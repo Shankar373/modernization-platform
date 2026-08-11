@@ -102,13 +102,14 @@ class IngestionService:
     def _flatten_single_directory(self, ws: Path) -> None:
         """If workspace has exactly one directory and no other files, move its contents to the root."""
         entries = list(ws.iterdir())
-        # Filter out hidden files
-        entries = [e for e in entries if not e.name.startswith(".")]
+        # Filter out hidden files and the temporary upload zip
+        entries = [e for e in entries if not e.name.startswith(".") and e.name != "_upload.zip"]
         
         if len(entries) == 1 and entries[0].is_dir():
             single_dir = entries[0]
             # Move all contents of the single directory to the parent workspace root
             for item in single_dir.iterdir():
+                # Avoid moving back into itself
                 shutil.move(str(item), str(ws))
             # Delete the now-empty subdirectory
             shutil.rmtree(str(single_dir), ignore_errors=True)
