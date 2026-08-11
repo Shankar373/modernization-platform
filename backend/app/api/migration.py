@@ -1,7 +1,11 @@
 """Migration API — plan, dry run, approve, execute, report."""
+import io
+import zipfile
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.domain.models import MigrationProfile
@@ -12,7 +16,7 @@ router = APIRouter()
 _orchestrator = MigrationOrchestrator()
 _scanner = UniversalScanner()
 
-# In-memory plan store (replace with DB in production)
+# In-memory plan/result store (replace with DB in production)
 _plans: dict = {}
 _results: dict = {}
 
@@ -34,6 +38,12 @@ class ExecuteRequest(BaseModel):
     workspace_path: str
     plan_id: str
     approved: bool
+
+
+class MigrateAllRequest(BaseModel):
+    workspace_path: str
+    project_id: str
+    migration_profile: MigrationProfile = MigrationProfile.STANDARD
 
 
 @router.post("/migration/plan")
@@ -98,6 +108,32 @@ async def execute_migration(request: ExecuteRequest):
         raise HTTPException(status_code=500, detail=f"Migration failed: {e}")
 
 
+@router.post("/migration/migrate-all")
+async def migrate_all(request: MigrateAllRequest):
+    """
+    Full-application migration — auto-detects ALL languages and runs every
+    applicable adapter (Python/ruff, HTML, CSS, JS/prettier, JSON, YAML, Markdown).
+    Returns a single combined result.
+    """
+    try:
+        result = _orchestrator.migrate_all(
+            workspace_path=request.workspace_path,
+            project_id=request.project_id,
+            migration_profile=request.migration_profile,
+        )
+        # Store with a synthetic plan_data so download/report still work
+        _results[result.result_id] = {
+            "result": result,
+            "plan_data": {
+                "workspace_path": request.workspace_path,
+                "plan": None,
+            },
+        }
+        return result.model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Full-app migration failed: {e}")
+
+
 @router.get("/migration/result/{result_id}")
 async def get_result(result_id: str):
     """Get a migration result by ID."""
@@ -136,3 +172,42 @@ async def get_changed_files(result_id: str):
         "changed_files": [f.model_dump() for f in result.changed_files],
         "statistics": result.statistics.model_dump(),
     }
+
+
+@router.get("/migration/result/{result_id}/download")
+async def download_modernized_zip(result_id: str):
+    """
+    Download the modernized workspace as a ZIP file.
+    The workspace contains all files after migration has been applied.
+    """
+    result_data = _results.get(result_id)
+    if not result_data:
+        raise HTTPException(status_code=404, detail="Result not found.")
+
+    workspace_path = result_data["plan_data"].get("workspace_path", "")
+    ws = Path(workspace_path)
+    if not ws.exists():
+        raise HTTPException(status_code=404, detail="Workspace no longer exists — it may have been cleaned up.")
+
+    _SKIP_IN_ZIP = {".git", "__pycache__", ".venv", "venv", "node_modules", ".pytest_cache"}
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for file_path in sorted(ws.rglob("*")):
+            if not file_path.is_file():
+                continue
+            # Skip hidden/build directories
+            if any(part in _SKIP_IN_ZIP for part in file_path.parts):
+                continue
+            arcname = str(file_path.relative_to(ws))
+            zf.write(file_path, arcname)
+    buf.seek(0)
+
+    project_id = result_data["result"].project_id or "modernized"
+    filename = f"{project_id[:8]}-modernized.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

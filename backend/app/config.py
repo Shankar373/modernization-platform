@@ -1,6 +1,12 @@
 """Application configuration using pydantic-settings."""
+import tempfile
+from pathlib import Path
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve a cross-platform temp workspace root — safely outside the backend directory
+_DEFAULT_WORKSPACE = str(Path(tempfile.gettempdir()) / "modernization-workspaces")
+
 
 
 class Settings(BaseSettings):
@@ -31,7 +37,7 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/1"
 
     # Worker / Sandbox
-    workspace_base_path: str = "/tmp/modernization-workspaces"
+    workspace_base_path: str = _DEFAULT_WORKSPACE
     sandbox_enabled: bool = False
     sandbox_docker_image: str = "modernization-worker:latest"
     sandbox_cpu_limit: float = 1.0

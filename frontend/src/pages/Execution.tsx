@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { executeMigration } from '../api/client';
+
+
 
 const STEPS = [
   'Repository ingested',
@@ -21,7 +23,14 @@ export default function Execution() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
 
+  const hasFired = useRef(false);
+
   useEffect(() => {
+    // ── Guard: React Strict Mode mounts effects twice in dev.
+    //    hasFired ensures the migration call only executes once. ──
+    if (hasFired.current) return;
+    hasFired.current = true;
+
     const run = async () => {
       // Animate steps
       for (let i = 0; i < STEPS.length - 2; i++) {
@@ -30,10 +39,35 @@ export default function Execution() {
       }
       try {
         const res = await executeMigration(workspacePath, planId!);
-        setResult(res.data);
+        const data = res.data;
+        setResult(data);
         setStepIndex(STEPS.length);
-        sessionStorage.setItem(`result_${res.data.result_id}`, JSON.stringify(res.data));
-        setTimeout(() => navigate(`/results/${res.data.result_id}`), 1000);
+        // Cache result for Results page fallback
+        sessionStorage.setItem(`result_${data.result_id}`, JSON.stringify(data));
+
+        // ── Write history entry ───────────────────────────────────────────
+        const planMeta = (() => {
+          try { return JSON.parse(sessionStorage.getItem(`plan_${planId}`) || '{}'); }
+          catch { return {}; }
+        })();
+        const language = planMeta?.plan?.targets?.[0]?.language
+          || planMeta?.plan?.steps?.[0]?.adapter
+          || sp.get('lang')
+          || 'unknown';
+        const projectName = planMeta?.plan?.project_id?.slice(0, 8) || planId?.slice(0, 8) || 'unknown';
+        sessionStorage.setItem(`run_${data.result_id}`, JSON.stringify({
+          resultId:      data.result_id,
+          planId:        planId,
+          projectName,
+          language,
+          status:        data.status,
+          completedAt:   data.completed_at || new Date().toISOString(),
+          filesModified: data.statistics?.files_modified ?? 0,
+          filesScanned:  data.statistics?.files_scanned  ?? 0,
+        }));
+        // ─────────────────────────────────────────────────────────────────
+
+        setTimeout(() => navigate(`/results/${data.result_id}`), 1000);
       } catch (e: any) {
         setError(e?.response?.data?.detail || 'Migration failed');
         setStepIndex(-1);
@@ -41,6 +75,7 @@ export default function Execution() {
     };
     run();
   }, [planId]);
+
 
   return (
     <div style={{ maxWidth: 600 }}>

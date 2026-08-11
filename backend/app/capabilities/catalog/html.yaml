@@ -1,0 +1,22 @@
+name: html-modernization
+language: html
+provider: beautifulsoup4
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "5"
+risk: low
+description: "Modernize legacy HTML tags and attributes to standard HTML5 markup"
+
+---
+name: html-formatting
+language: html
+provider: beautifulsoup4
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "*"
+risk: low
+description: "Format and indent HTML source files for improved readability"

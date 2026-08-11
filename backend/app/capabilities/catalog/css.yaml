@@ -1,0 +1,22 @@
+name: css-modernization
+language: css
+provider: custom-css-parser
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "3"
+risk: low
+description: "Modernize CSS colors and dimensions into design tokens and theme variables"
+
+---
+name: css-formatting
+language: css
+provider: custom-css-parser
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "*"
+risk: low
+description: "Prettify CSS properties, selectors, and spacing structure"

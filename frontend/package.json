@@ -16,9 +16,7 @@
     "lucide-react": "^1.31.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-query": "^3.39.3",
-    "react-router-dom": "^7.18.2",
-    "react-syntax-highlighter": "^16.1.1"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

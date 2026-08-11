@@ -63,14 +63,4 @@
   status: ASSESSMENT_ONLY
   notes: "COBOL modernization requires specialized tooling. Assessment and roadmap only."
 
-- name: html-modernization
-  language: html
-  provider: unknown
-  status: NOT_AVAILABLE
-  notes: "Real connector not yet implemented."
 
-- name: css-modernization
-  language: css
-  provider: unknown
-  status: NOT_AVAILABLE
-  notes: "Real connector not yet implemented."

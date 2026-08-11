@@ -1,0 +1,132 @@
+"""JSON formatter adapter — prettifies and normalizes JSON files."""
+from __future__ import annotations
+import difflib
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import List
+
+from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.core.domain.models import (
+    CapabilityStatus, FileChangeMetadata, MigrationCapability,
+    MigrationPlan, MigrationProfile, MigrationResult, MigrationStatistics,
+    MigrationStatus, MigrationTarget, PlanStep, RiskLevel, TechnologyProfile,
+)
+
+_SKIP_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git", "dist", "build"}
+
+
+class JsonFormatterAdapter(MigrationAdapter):
+    """Formats JSON files with consistent 2-space indentation and sorted keys."""
+
+    @property
+    def language(self) -> str:
+        return "json"
+
+    @property
+    def provider(self) -> str:
+        return "stdlib-json"
+
+    def detect(self, workspace_path: str) -> bool:
+        return any(
+            f for f in Path(workspace_path).rglob("*.json")
+            if not any(s in f.parts for s in _SKIP_DIRS)
+        )
+
+    def analyze(self, profile: TechnologyProfile) -> AnalysisResult:
+        has_json = any(l for l in profile.languages if l.name.lower() == "json")
+        return AnalysisResult(applicable=has_json, notes="JSON formatting available")
+
+    def get_capabilities(self) -> List[MigrationCapability]:
+        return [MigrationCapability(
+            name="json-formatting", language="json", provider="stdlib-json",
+            status=CapabilityStatus.AVAILABLE, source_versions=["*"], target_versions=["*"],
+            risk=RiskLevel.LOW, description="Format JSON with 2-space indentation and sorted keys",
+        )]
+
+    def create_plan(self, workspace_path, profile, target_version, migration_profile=MigrationProfile.CONSERVATIVE):
+        return MigrationPlan(
+            plan_id=f"json-plan-{os.urandom(4).hex()}",
+            project_id=getattr(profile, "profile_id", "json-project"),
+            profile=migration_profile, overall_risk=RiskLevel.LOW,
+            steps=[PlanStep(order=1, name="JSON Formatting", description="Format all JSON files",
+                           adapter="json", capability="json-formatting", risk=RiskLevel.LOW, is_reversible=True)],
+            targets=[MigrationTarget(language="json", source_version=None, target_version="formatted")],
+            selected_capabilities=["json-formatting"],
+        )
+
+    def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
+        before = self._snapshot(Path(workspace_path))
+        after = self._format_all(before)
+        changed = sum(1 for k in before if before[k] != after.get(k, ""))
+        return DryRunResult(success=True, files_would_change=changed,
+                           notes=f"{changed} JSON file(s) would be reformatted.")
+
+    def migrate(self, workspace_path: str, plan: MigrationPlan) -> MigrationResult:
+        ws = Path(workspace_path)
+        before = self._snapshot(ws)
+        changed_files, modified = [], 0
+        timeline = [{"step": "JSON formatting started", "status": "running", "ts": datetime.utcnow().isoformat()}]
+
+        for rel, content in before.items():
+            formatted = self._format_json(content)
+            if formatted and formatted != content:
+                (ws / rel).write_text(formatted, encoding="utf-8")
+                diff = "".join(difflib.unified_diff(
+                    content.splitlines(keepends=True), formatted.splitlines(keepends=True),
+                    fromfile=f"a/{rel}", tofile=f"b/{rel}"))
+                changed_files.append(FileChangeMetadata(
+                    file=rel, status="MODIFIED", diff=diff,
+                    before_content=content, after_content=formatted,
+                    tools=["stdlib-json"],
+                    changes=[{"type": "JSON_FORMAT", "description": "Normalized JSON indentation and key order"}],
+                ))
+                modified += 1
+
+        timeline.append({"step": "JSON formatting completed", "status": "completed", "ts": datetime.utcnow().isoformat()})
+        return MigrationResult(
+            result_id=f"json-res-{os.urandom(4).hex()}", job_id=plan.plan_id,
+            project_id=plan.project_id, plan_id=plan.plan_id,
+            status=MigrationStatus.SUCCESS if modified else MigrationStatus.PARTIALLY_SUCCESSFUL,
+            statistics=MigrationStatistics(files_scanned=len(before), files_modified=modified,
+                                           files_unchanged=len(before)-modified, capabilities_run=1, build_passed=True),
+            changed_files=changed_files, timeline=timeline, completed_at=datetime.utcnow(),
+        )
+
+    def validate(self, workspace_path, result) -> ValidationResult:
+        ok = all(self._format_json(f.read_text(encoding="utf-8", errors="replace")) is not None
+                 for f in self._iter(Path(workspace_path)))
+        return ValidationResult(build_passed=ok, tests_passed=ok, tests_total=1)
+
+    def generate_report(self, result, validation) -> dict:
+        return {"report_id": f"json-rep-{os.urandom(4).hex()}", "generated_at": datetime.utcnow().isoformat(),
+                "adapter": "json/formatter", "final_status": result.status.value,
+                "statistics": result.statistics.model_dump(), "changed_files_count": len(result.changed_files),
+                "build_passed": validation.build_passed, "timeline": result.timeline,
+                "changed_files": [f.model_dump() for f in result.changed_files]}
+
+    # helpers
+    def _format_json(self, content: str) -> str | None:
+        try:
+            obj = json.loads(content)
+            return json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        except (json.JSONDecodeError, Exception):
+            return None
+
+    def _iter(self, ws: Path):
+        for f in ws.rglob("*.json"):
+            if not any(s in f.parts for s in _SKIP_DIRS):
+                yield f
+
+    def _snapshot(self, ws: Path) -> dict:
+        out = {}
+        for f in self._iter(ws):
+            try:
+                out[str(f.relative_to(ws))] = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        return out
+
+    def _format_all(self, snap: dict) -> dict:
+        return {k: self._format_json(v) or v for k, v in snap.items()}
