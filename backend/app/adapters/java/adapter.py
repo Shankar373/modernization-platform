@@ -1,0 +1,453 @@
+"""
+Java Migration Adapter — OpenRewrite
+
+Implements the MigrationAdapter interface for Java applications.
+Uses OpenRewrite for deterministic, recipe-driven code transformations.
+"""
+from __future__ import annotations
+
+import difflib
+import json
+import os
+import shutil
+import subprocess
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+from app.adapters.base import (
+    AnalysisResult,
+    DryRunResult,
+    MigrationAdapter,
+    ValidationResult,
+)
+from app.core.domain.models import (
+    CapabilityStatus,
+    DetectionEvidence,
+    FileChangeMetadata,
+    MigrationCapability,
+    MigrationPlan,
+    MigrationProfile,
+    MigrationResult,
+    MigrationStatistics,
+    MigrationStatus,
+    MigrationTarget,
+    PlanStep,
+    RiskLevel,
+    TechnologyProfile,
+)
+from app.adapters.java.recipe_catalog import RecipeCatalog
+from app.adapters.java.rewrite_yml_generator import RewriteYmlGenerator
+
+
+class JavaOpenRewriteAdapter(MigrationAdapter):
+    """
+    Java migration adapter using OpenRewrite.
+
+    Supports:
+    - Java version detection (8, 11, 17, 21)
+    - Maven/Gradle build systems
+    - Spring Boot framework migrations
+    - Dynamic recipe selection from controlled catalog
+    - Dry run via OpenRewrite --dry-run
+    - Build validation via mvn test
+    """
+
+    @property
+    def language(self) -> str:
+        return "java"
+
+    @property
+    def provider(self) -> str:
+        return "openrewrite"
+
+    # ── Detection ─────────────────────────────────────────────────────────────
+
+    def detect(self, workspace_path: str) -> bool:
+        """Return True if the workspace contains a Java project."""
+        ws = Path(workspace_path)
+        indicators = [
+            ws.glob("**/*.java"),
+            ws.glob("**/pom.xml"),
+            ws.glob("**/build.gradle"),
+            ws.glob("**/build.gradle.kts"),
+        ]
+        return any(next(g, None) is not None for g in indicators)
+
+    # ── Analysis ──────────────────────────────────────────────────────────────
+
+    def analyze(self, profile: TechnologyProfile) -> AnalysisResult:
+        """Analyze Java-specific profile metadata."""
+        java_langs = [l for l in profile.languages if l.name.lower() == "java"]
+        if not java_langs:
+            return AnalysisResult(applicable=False, notes="No Java detected in profile.")
+
+        lang = java_langs[0]
+        metadata = {
+            "detected_version": lang.version,
+            "confidence": lang.confidence,
+            "has_maven": any(b.name.lower() == "maven" for b in profile.build_systems),
+            "has_gradle": any(b.name.lower() == "gradle" for b in profile.build_systems),
+            "frameworks": [f.name for f in profile.frameworks if f.language.lower() == "java"],
+        }
+        return AnalysisResult(applicable=True, metadata=metadata)
+
+    # ── Capabilities ──────────────────────────────────────────────────────────
+
+    def get_capabilities(self) -> List[MigrationCapability]:
+        return [
+            MigrationCapability(
+                name="java-8-to-17",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["8", "1.8"],
+                target_versions=["17"],
+                risk=RiskLevel.MEDIUM,
+                description="Migrate Java 8 to Java 17 LTS using OpenRewrite",
+            ),
+            MigrationCapability(
+                name="java-8-to-21",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["8", "1.8"],
+                target_versions=["21"],
+                risk=RiskLevel.HIGH,
+                description="Migrate Java 8 to Java 21 LTS using OpenRewrite",
+            ),
+            MigrationCapability(
+                name="java-11-to-17",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["11"],
+                target_versions=["17"],
+                risk=RiskLevel.LOW,
+                description="Migrate Java 11 to Java 17 LTS using OpenRewrite",
+            ),
+            MigrationCapability(
+                name="java-11-to-21",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["11"],
+                target_versions=["21"],
+                risk=RiskLevel.MEDIUM,
+                description="Migrate Java 11 to Java 21 LTS using OpenRewrite",
+            ),
+            MigrationCapability(
+                name="spring-boot-1x-to-2x",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["1.x"],
+                target_versions=["2.x"],
+                risk=RiskLevel.MEDIUM,
+                description="Spring Boot 1.x to 2.x migration",
+            ),
+            MigrationCapability(
+                name="spring-boot-2x-to-3x",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["2.x"],
+                target_versions=["3.x"],
+                risk=RiskLevel.HIGH,
+                description="Spring Boot 2.x to 3.x (Jakarta EE) migration",
+            ),
+            MigrationCapability(
+                name="javax-to-jakarta",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["*"],
+                target_versions=["jakarta"],
+                risk=RiskLevel.MEDIUM,
+                description="Migrate javax.* imports to jakarta.*",
+            ),
+            MigrationCapability(
+                name="java-dependency-modernization",
+                language="java",
+                provider="openrewrite",
+                status=CapabilityStatus.AVAILABLE,
+                source_versions=["*"],
+                target_versions=["*"],
+                risk=RiskLevel.LOW,
+                description="Update outdated Maven/Gradle dependencies",
+            ),
+        ]
+
+    # ── Plan Creation ─────────────────────────────────────────────────────────
+
+    def create_plan(
+        self,
+        workspace_path: str,
+        profile: TechnologyProfile,
+        target_version: str,
+        migration_profile: MigrationProfile = MigrationProfile.CONSERVATIVE,
+    ) -> MigrationPlan:
+        """Dynamically select recipes based on source tech, target, deps, and policy."""
+        analysis = self.analyze(profile)
+        source_version = analysis.metadata.get("detected_version", "8")
+        frameworks = analysis.metadata.get("frameworks", [])
+
+        catalog = RecipeCatalog()
+        selected_recipes = catalog.select_recipes(
+            source_version=source_version,
+            target_version=target_version,
+            frameworks=frameworks,
+            dependencies=[d.name for d in profile.dependencies if d.language.lower() == "java"],
+            migration_profile=migration_profile,
+        )
+
+        steps = []
+        for i, recipe in enumerate(selected_recipes):
+            steps.append(PlanStep(
+                order=i + 1,
+                name=recipe["name"],
+                description=recipe["description"],
+                adapter="java",
+                capability=recipe["capability"],
+                risk=RiskLevel(recipe.get("risk", "MEDIUM")),
+                estimated_files=recipe.get("estimated_files", 0),
+                is_reversible=recipe.get("is_reversible", True),
+            ))
+
+        target = MigrationTarget(
+            language="java",
+            source_version=source_version,
+            target_version=target_version,
+        )
+        if frameworks:
+            target.framework_source = frameworks[0] if frameworks else None
+
+        return MigrationPlan(
+            project_id=profile.profile_id,
+            profile=migration_profile,
+            targets=[target],
+            steps=steps,
+            selected_capabilities=[r["capability"] for r in selected_recipes],
+            overall_risk=self._assess_overall_risk(steps),
+        )
+
+    def _assess_overall_risk(self, steps: List[PlanStep]) -> RiskLevel:
+        if any(s.risk == RiskLevel.CRITICAL for s in steps):
+            return RiskLevel.CRITICAL
+        if any(s.risk == RiskLevel.HIGH for s in steps):
+            return RiskLevel.HIGH
+        if any(s.risk == RiskLevel.MEDIUM for s in steps):
+            return RiskLevel.MEDIUM
+        return RiskLevel.LOW
+
+    # ── Dry Run ───────────────────────────────────────────────────────────────
+
+    def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
+        """
+        Execute OpenRewrite in dry-run mode to preview changes without modifying files.
+        """
+        generator = RewriteYmlGenerator()
+        rewrite_yml_path = generator.generate(
+            workspace_path=workspace_path,
+            plan=plan,
+        )
+
+        pom_path = Path(workspace_path) / "pom.xml"
+        if not pom_path.exists():
+            return DryRunResult(
+                success=False,
+                notes="pom.xml not found — Maven build required for OpenRewrite dry run.",
+            )
+
+        try:
+            result = subprocess.run(
+                [
+                    "mvn",
+                    "-f", str(pom_path),
+                    "org.openrewrite.maven:rewrite-maven-plugin:run",
+                    f"-Drewrite.configFile={rewrite_yml_path}",
+                    "-Drewrite.dryRun=true",
+                    "--no-transfer-progress",
+                    "-q",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=workspace_path,
+            )
+            success = result.returncode == 0
+            return DryRunResult(
+                success=success,
+                notes=result.stdout[-2000:] if result.stdout else result.stderr[-2000:],
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            return DryRunResult(success=False, notes=f"Dry run failed: {e}")
+
+    # ── Migration ─────────────────────────────────────────────────────────────
+
+    def migrate(self, workspace_path: str, plan: MigrationPlan) -> MigrationResult:
+        """
+        Execute the actual OpenRewrite migration.
+        Captures real before/after diffs — never fabricates changes.
+        """
+        ws = Path(workspace_path)
+        generator = RewriteYmlGenerator()
+        rewrite_yml_path = generator.generate(workspace_path=workspace_path, plan=plan)
+
+        # Snapshot before state
+        before_state = self._snapshot_java_files(ws)
+
+        pom_path = ws / "pom.xml"
+        timeline = [{"step": "Migration started", "status": "running", "ts": datetime.utcnow().isoformat()}]
+
+        if not pom_path.exists():
+            return MigrationResult(
+                result_id=str(uuid.uuid4()),
+                job_id=plan.plan_id,
+                project_id=plan.project_id,
+                plan_id=plan.plan_id,
+                status=MigrationStatus.FAILED,
+                warnings=["pom.xml not found"],
+            )
+
+        try:
+            proc = subprocess.run(
+                [
+                    "mvn",
+                    "-f", str(pom_path),
+                    "org.openrewrite.maven:rewrite-maven-plugin:run",
+                    f"-Drewrite.configFile={rewrite_yml_path}",
+                    "--no-transfer-progress",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                cwd=workspace_path,
+            )
+
+            timeline.append({
+                "step": "OpenRewrite executed",
+                "status": "completed" if proc.returncode == 0 else "failed",
+                "ts": datetime.utcnow().isoformat(),
+            })
+
+            after_state = self._snapshot_java_files(ws)
+            changed_files = self._compute_diffs(before_state, after_state)
+
+            stats = MigrationStatistics(
+                files_scanned=len(before_state),
+                files_modified=len(changed_files),
+                files_unchanged=len(before_state) - len(changed_files),
+                capabilities_run=len(plan.steps),
+            )
+
+            status = MigrationStatus.SUCCESS if proc.returncode == 0 else MigrationStatus.FAILED
+
+            return MigrationResult(
+                result_id=str(uuid.uuid4()),
+                job_id=plan.plan_id,
+                project_id=plan.project_id,
+                plan_id=plan.plan_id,
+                status=status,
+                statistics=stats,
+                changed_files=changed_files,
+                timeline=timeline,
+                logs={"migration": proc.stdout[-5000:] if proc.stdout else ""},
+            )
+
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            return MigrationResult(
+                result_id=str(uuid.uuid4()),
+                job_id=plan.plan_id,
+                project_id=plan.project_id,
+                plan_id=plan.plan_id,
+                status=MigrationStatus.FAILED,
+                warnings=[str(e)],
+            )
+
+    # ── Validation ────────────────────────────────────────────────────────────
+
+    def validate(self, workspace_path: str, result: MigrationResult) -> ValidationResult:
+        """Run mvn test to validate the migrated project."""
+        pom_path = Path(workspace_path) / "pom.xml"
+        if not pom_path.exists():
+            return ValidationResult(errors=["pom.xml not found — cannot validate."])
+        try:
+            proc = subprocess.run(
+                ["mvn", "test", "--no-transfer-progress", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                cwd=workspace_path,
+            )
+            passed = proc.returncode == 0
+            return ValidationResult(
+                build_passed=passed,
+                tests_passed=passed,
+                raw_output=proc.stdout[-5000:],
+                errors=[] if passed else [proc.stderr[-2000:]],
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            return ValidationResult(errors=[str(e)])
+
+    # ── Report ────────────────────────────────────────────────────────────────
+
+    def generate_report(self, result: MigrationResult, validation: ValidationResult) -> dict:
+        """Generate evidence-based migration report. Never reports SUCCESS unless validated."""
+        final_status = result.status
+        if final_status == MigrationStatus.SUCCESS and not validation.build_passed:
+            final_status = MigrationStatus.PARTIALLY_SUCCESSFUL
+
+        return {
+            "report_id": str(uuid.uuid4()),
+            "generated_at": datetime.utcnow().isoformat(),
+            "adapter": "java/openrewrite",
+            "final_status": final_status.value,
+            "statistics": result.statistics.model_dump(),
+            "changed_files_count": len(result.changed_files),
+            "build_passed": validation.build_passed,
+            "tests_passed": validation.tests_passed,
+            "warnings": result.warnings + validation.warnings,
+            "errors": validation.errors,
+            "manual_remediation": result.manual_remediation,
+            "timeline": result.timeline,
+        }
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _snapshot_java_files(self, ws: Path) -> dict:
+        """Capture file contents for all Java source files."""
+        snapshot = {}
+        for f in ws.rglob("*.java"):
+            try:
+                snapshot[str(f.relative_to(ws))] = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        return snapshot
+
+    def _compute_diffs(self, before: dict, after: dict) -> List[FileChangeMetadata]:
+        """Compute real diffs between before and after snapshots."""
+        changed = []
+        all_files = set(before.keys()) | set(after.keys())
+        for path in all_files:
+            b = before.get(path, "")
+            a = after.get(path, "")
+            if b != a:
+                diff = "".join(difflib.unified_diff(
+                    b.splitlines(keepends=True),
+                    a.splitlines(keepends=True),
+                    fromfile=f"a/{path}",
+                    tofile=f"b/{path}",
+                ))
+                status = "ADDED" if not b else ("DELETED" if not a else "MODIFIED")
+                changed.append(FileChangeMetadata(
+                    file=path,
+                    status=status,
+                    tools=["OpenRewrite"],
+                    before_content=b,
+                    after_content=a,
+                    diff=diff,
+                    changes=[{"type": "CODE_MIGRATION", "description": "OpenRewrite transformation applied"}],
+                ))
+        return changed

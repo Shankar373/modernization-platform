@@ -1,0 +1,61 @@
+name: python-modernization
+language: python
+provider: ruff
+status: AVAILABLE
+source_versions:
+  - "2.7"
+  - "3.6"
+  - "3.7"
+  - "3.8"
+  - "3.9"
+  - "3.10"
+  - "3.11"
+target_versions:
+  - "3.9"
+  - "3.10"
+  - "3.11"
+  - "3.12"
+risk: low
+description: "Python code modernization with Ruff — linting, formatting, auto-fix"
+
+---
+name: python-version-upgrade
+language: python
+provider: ruff
+status: AVAILABLE
+source_versions:
+  - "2.7"
+  - "3.6"
+  - "3.7"
+  - "3.8"
+target_versions:
+  - "3.9"
+  - "3.10"
+  - "3.11"
+  - "3.12"
+risk: medium
+description: "Upgrade Python target version with compatible syntax modernization"
+
+---
+name: python-formatting
+language: python
+provider: ruff
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "*"
+risk: low
+description: "Apply consistent formatting with Ruff formatter"
+
+---
+name: python-lint-autofix
+language: python
+provider: ruff
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "*"
+risk: low
+description: "Auto-fix safe lint violations with Ruff"

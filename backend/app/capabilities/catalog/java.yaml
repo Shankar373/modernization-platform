@@ -1,0 +1,96 @@
+name: java-8-to-17
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "8"
+  - "1.8"
+target_versions:
+  - "17"
+risk: medium
+description: "Migrate Java 8 to Java 17 LTS using OpenRewrite"
+
+---
+name: java-8-to-21
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "8"
+  - "1.8"
+target_versions:
+  - "21"
+risk: high
+description: "Migrate Java 8 to Java 21 LTS using OpenRewrite"
+
+---
+name: java-11-to-17
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "11"
+target_versions:
+  - "17"
+risk: low
+description: "Migrate Java 11 to Java 17 LTS using OpenRewrite"
+
+---
+name: java-11-to-21
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "11"
+target_versions:
+  - "21"
+risk: medium
+description: "Migrate Java 11 to Java 21 LTS"
+
+---
+name: spring-boot-1x-to-2x
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "1.x"
+target_versions:
+  - "2.x"
+risk: medium
+description: "Spring Boot 1.x to 2.x migration"
+
+---
+name: spring-boot-2x-to-3x
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "2.x"
+target_versions:
+  - "3.x"
+risk: high
+description: "Spring Boot 2.x to 3.x (Jakarta EE) migration"
+
+---
+name: javax-to-jakarta
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "jakarta"
+risk: medium
+description: "Migrate javax.* to jakarta.* namespace"
+
+---
+name: java-dependency-modernization
+language: java
+provider: openrewrite
+status: AVAILABLE
+source_versions:
+  - "*"
+target_versions:
+  - "*"
+risk: low
+description: "Update outdated Maven/Gradle dependencies"
