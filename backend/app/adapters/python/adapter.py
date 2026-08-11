@@ -219,9 +219,13 @@ class PythonRuffAdapter(MigrationAdapter):
 
     def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
         """Run ruff check --diff to preview changes without modifying files."""
+        cmd = ["ruff", "check", "--diff"]
+        if plan.profile == MigrationProfile.AGGRESSIVE:
+            cmd.append("--unsafe-fixes")
+        cmd.append(workspace_path)
         try:
             result = subprocess.run(
-                ["ruff", "check", "--diff", workspace_path],
+                cmd,
                 capture_output=True, text=True, timeout=120,
             )
             return DryRunResult(
@@ -248,9 +252,13 @@ class PythonRuffAdapter(MigrationAdapter):
 
         # Step 1: ruff check --fix
         if any(s.capability == "python-lint-autofix" for s in plan.steps):
+            cmd = ["ruff", "check", "--fix"]
+            if plan.profile == MigrationProfile.AGGRESSIVE:
+                cmd.append("--unsafe-fixes")
+            cmd.append(workspace_path)
             try:
                 subprocess.run(
-                    ["ruff", "check", "--fix", workspace_path],
+                    cmd,
                     capture_output=True, text=True, timeout=120,
                 )
                 timeline.append({"step": "Ruff check --fix", "status": "completed", "ts": datetime.utcnow().isoformat()})
