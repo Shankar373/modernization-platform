@@ -93,8 +93,25 @@ class IngestionService:
                         raise SecurityError("Archive bomb detected — total extracted size too large")
 
                 zf.extractall(str(ws))
+            
+            # Post-extract cleanup: flatten if zip had a single root directory
+            self._flatten_single_directory(ws)
         finally:
             tmp_zip.unlink(missing_ok=True)
+
+    def _flatten_single_directory(self, ws: Path) -> None:
+        """If workspace has exactly one directory and no other files, move its contents to the root."""
+        entries = list(ws.iterdir())
+        # Filter out hidden files
+        entries = [e for e in entries if not e.name.startswith(".")]
+        
+        if len(entries) == 1 and entries[0].is_dir():
+            single_dir = entries[0]
+            # Move all contents of the single directory to the parent workspace root
+            for item in single_dir.iterdir():
+                shutil.move(str(item), str(ws))
+            # Delete the now-empty subdirectory
+            shutil.rmtree(str(single_dir), ignore_errors=True)
 
     def ingest_git(self, git_url: str, workspace_path: str, branch: str = "main") -> None:
         """
