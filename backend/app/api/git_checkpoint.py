@@ -142,6 +142,56 @@ async def create_git_checkpoint(request: GitCheckpointRequest):
         )
 
 
+def _get_workspace_project_name(ws: Path) -> str:
+    """Intelligently resolve project name from metadata files or directory structure."""
+    import json
+    # 1. Read .project_name if created during ingestion
+    proj_file = ws / ".project_name"
+    if proj_file.exists():
+        txt = proj_file.read_text(encoding="utf-8").strip()
+        if txt and txt != "unnamed":
+            return txt
+
+    # 2. Try parsing package.json
+    for pkg_path in [ws / "package.json", ws / "frontend" / "package.json"]:
+        if pkg_path.exists():
+            try:
+                data = json.loads(pkg_path.read_text(encoding="utf-8"))
+                if data.get("name"):
+                    return data["name"]
+            except Exception:
+                pass
+
+    # 3. Try parsing pom.xml
+    pom_xml = ws / "pom.xml"
+    if pom_xml.exists():
+        try:
+            content = pom_xml.read_text(encoding="utf-8")
+            m = re.search(r"<artifactId>(.*?)</artifactId>", content)
+            if m and m.group(1):
+                return m.group(1)
+        except Exception:
+            pass
+
+    # 4. Try parsing pyproject.toml
+    pyproject = ws / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            content = pyproject.read_text(encoding="utf-8")
+            m = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
+            if m and m.group(1):
+                return m.group(1)
+        except Exception:
+            pass
+
+    # 5. Fallback to workspace path name if not a raw UUID
+    ws_name = ws.name
+    if not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', ws_name, re.IGNORECASE):
+        return ws_name
+
+    return "modernized-project"
+
+
 @router.get("/git/checkpoint/download")
 async def download_checkpoint_workspace(workspace_path: str, project_id: str):
     """
@@ -158,15 +208,11 @@ async def download_checkpoint_workspace(workspace_path: str, project_id: str):
         raise HTTPException(status_code=404, detail="Workspace path does not exist.")
 
     try:
-        # Determine clean project name
-        proj_name_file = ws / ".project_name"
-        if proj_name_file.exists():
-            raw_name = proj_name_file.read_text(encoding="utf-8").strip()
-        else:
-            raw_name = ws.name
+        # Determine clean project name via metadata inspection
+        raw_name = _get_workspace_project_name(ws)
 
         clean_root = re.sub(r'[\(\)\s]+', '-', raw_name).strip('-')
-        clean_root = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_root) or "workspace"
+        clean_root = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_root) or "modernized-project"
         
         # Suffix with modernized
         if not clean_root.lower().endswith("-modernized"):
