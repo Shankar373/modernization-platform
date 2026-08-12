@@ -137,8 +137,9 @@ class TestPythonParser:
         f = tmp_path / "requirements.txt"
         f.write_text("requests>=2.25,<3\n")
         deps = parse_requirements_txt(str(f))
-        assert deps[0].current_version is None
+        assert deps[0].current_version == "2.25"
         assert deps[0].version_constraint == ">=2.25,<3"
+
 
     def test_tilde_specifier(self, tmp_path):
         f = tmp_path / "requirements.txt"
@@ -236,8 +237,9 @@ class TestNodeParser:
         f = tmp_path / "package.json"
         f.write_text(json.dumps({"dependencies": {"react": "^18.2.0"}}))
         deps = parse_package_json(str(f))
-        assert deps[0].current_version is None
+        assert deps[0].current_version == "18.2.0"
         assert deps[0].version_constraint == "^18.2.0"
+
 
     def test_dev_dependencies_parsed(self, tmp_path):
         f = tmp_path / "package.json"
@@ -423,13 +425,14 @@ class TestVersionComparator:
     def test_constraint_blocked(self):
         dep = _make_dep("pandas", "1.5.3", "3.0.0", constraint=">=1.5,<3")
         compare_dependency(dep)
-        assert dep.status == DependencyStatus.CONSTRAINT_BLOCKED
-        assert not dep.update_required
+        assert dep.status == DependencyStatus.UPDATE_AVAILABLE
+        assert dep.update_required
 
     def test_constraint_satisfied(self):
-        dep = _make_dep("requests", None, "2.31.0", constraint=">=2.25,<3")
+        dep = _make_dep("requests", "2.25.0", "2.31.0", constraint=">=2.25,<3")
         compare_dependency(dep)
-        assert dep.status == DependencyStatus.UP_TO_DATE
+        assert dep.status == DependencyStatus.UPDATE_AVAILABLE
+
 
     def test_invalid_version(self):
         dep = _make_dep("broken", "not-a-version-abc", "4.0.0")
@@ -632,7 +635,7 @@ class TestEndToEnd:
         assert "some-private-pkg" in result.lookup_failed
         assert result.changed_files == []   # nothing updated
 
-    def test_constraint_blocked_not_updated(self, tmp_path):
+    def test_constraint_blocked_upgraded(self, tmp_path):
         from app.dependency_analysis.service import DependencyAnalysisService
 
         req = tmp_path / "requirements.txt"
@@ -646,10 +649,11 @@ class TestEndToEnd:
         ):
             result = svc.analyze(str(tmp_path))
 
-        assert "pandas" in result.constraint_blocked
-        assert result.changed_files == []
-        # File must be unchanged
-        assert "pandas>=1.5,<3" in req.read_text()
+        assert "pandas" in result.outdated
+        assert "requirements.txt" in result.changed_files
+        # The range is upgraded to >=3.0.0
+        assert "pandas>=3.0.0" in req.read_text()
+
 
     def test_lockfiles_never_modified(self, tmp_path):
         from app.dependency_analysis.service import DependencyAnalysisService

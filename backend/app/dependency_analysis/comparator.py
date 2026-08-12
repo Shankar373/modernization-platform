@@ -129,12 +129,11 @@ def compare_dependency(dep: Dependency) -> Dependency:
         # Newer version available — check if it respects the explicit constraint
         if dep.version_constraint and not dep.version_constraint.startswith("=="):
             if not _latest_satisfies_constraint(latest, dep.version_constraint):
-                dep.status = DependencyStatus.CONSTRAINT_BLOCKED
-                dep.update_required = False
-                dep.reason = (
-                    f"Latest stable {latest} violates explicit constraint "
-                    f"'{dep.version_constraint}'. Constraint must be relaxed manually."
-                )
+                # The user wants to automatically upgrade, so instead of blocking,
+                # we mark it as UPDATE_AVAILABLE and let the updater relax the constraint.
+                dep.status = DependencyStatus.UPDATE_AVAILABLE
+                dep.update_required = True
+                dep.reason = f"Update available (upgrades constraint): {current} → {latest}."
                 return dep
 
         dep.status = DependencyStatus.UPDATE_AVAILABLE
@@ -147,3 +146,4 @@ def compare_dependency(dep: Dependency) -> Dependency:
         dep.reason = f"Current version {current} is at or ahead of the latest stable {latest}."
 
     return dep
+

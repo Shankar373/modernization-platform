@@ -22,10 +22,10 @@ from app.dependency_analysis.models import (
 def _parse_npm_version(spec: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Parse an npm version specifier into (pinned_version, constraint_expr).
-    e.g. "^18.2.0" → (None, "^18.2.0")
+    e.g. "^18.2.0" → ("18.2.0", "^18.2.0")
          "18.2.0"  → ("18.2.0", "18.2.0")
-         ">=18"    → (None, ">=18")
-         "*"       → (None, None)
+         ">=18"    → ("18",     ">=18")
+         "*"       → (None,     None)
     """
     spec = spec.strip()
     if not spec or spec in ("*", "latest", "x"):
@@ -35,7 +35,13 @@ def _parse_npm_version(spec: str) -> Tuple[Optional[str], Optional[str]]:
     if re.match(r"^\d+(\.\d+)*$", spec):
         return spec, spec
 
+    # Range fallback: extract the first version number in the specifier string
+    v_match = re.search(r"(\d+(\.\d+)*)", spec)
+    if v_match:
+        return v_match.group(1), spec
+
     return None, spec
+
 
 
 def parse_package_json(file_path: str) -> List[Dependency]:

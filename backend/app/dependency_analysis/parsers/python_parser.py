@@ -39,8 +39,8 @@ def _parse_specifier(raw: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Split a version specifier string into (pinned_version, constraint_expr).
     e.g. "==2.28.0"        → ("2.28.0", "==2.28.0")
-         ">=1.5,<3"        → (None,      ">=1.5,<3")
-         "~=1.21"          → (None,      "~=1.21")
+         ">=1.5,<3"        → ("1.5",     ">=1.5,<3")
+         "~=1.21"          → ("1.21",    "~=1.21")
          ""                → (None,      None)
     """
     spec = raw.strip()
@@ -49,7 +49,14 @@ def _parse_specifier(raw: str) -> Tuple[Optional[str], Optional[str]]:
     pin = _PINNED_RE.match(spec)
     if pin:
         return pin.group(1).strip(), spec
+
+    # Range/specifier fallback: extract the first version number in the specifier string
+    v_match = re.search(r"(\d+(\.\d+)*)", spec)
+    if v_match:
+        return v_match.group(1), spec
+
     return None, spec
+
 
 
 def parse_requirements_txt(file_path: str) -> List[Dependency]:
