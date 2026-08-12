@@ -146,7 +146,8 @@ def _latest_maven(coordinate: str) -> Optional[str]:
         return stable[0]
 
 
-# ── Public interface ──────────────────────────────────────────────────────────
+_latest_version_cache: dict[tuple[str, DependencyEcosystem], Optional[str]] = {}
+
 
 def get_latest_stable_version(
     name: str,
@@ -154,24 +155,24 @@ def get_latest_stable_version(
 ) -> Optional[str]:
     """
     Query the appropriate registry and return the latest stable version string.
-
-    Returns None if:
-    - The registry is unreachable (network failure / timeout)
-    - No stable release exists
-    - The package does not exist in the registry
-
-    The caller is responsible for setting status=LOOKUP_FAILED when None is returned.
-    Do NOT guess or substitute a placeholder version.
+    Caches lookups in-memory to optimize performance.
     """
+    cache_key = (name, ecosystem)
+    if cache_key in _latest_version_cache:
+        return _latest_version_cache[cache_key]
+
+    val = None
     try:
         if ecosystem == DependencyEcosystem.PYTHON:
-            return _latest_pypi(name)
+            val = _latest_pypi(name)
         elif ecosystem == DependencyEcosystem.NODE:
-            return _latest_npm(name)
+            val = _latest_npm(name)
         elif ecosystem == DependencyEcosystem.JAVA:
-            return _latest_maven(name)
-        else:
-            return None
+            val = _latest_maven(name)
     except Exception as exc:
         log.warning("Unexpected error resolving %s/%s: %s", ecosystem, name, exc)
-        return None
+        val = None
+
+    _latest_version_cache[cache_key] = val
+    return val
+

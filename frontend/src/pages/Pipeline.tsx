@@ -870,14 +870,15 @@ export default function Pipeline() {
     analyzeRepo(workspacePath, projectId)
       .then(res => {
         const data = res.data;
-        // Normalize profile from analysis response
+        // Extract from nested profile object
+        const p = data.profile || {};
         const profileData: TechnologyProfile = {
-          profile_id: data.profile_id || projectId,
+          profile_id: p.profile_id || projectId,
           workspace_path: workspacePath,
-          languages: data.languages || [],
-          frameworks: data.frameworks || [],
-          build_systems: data.build_systems || [],
-          test_frameworks: data.test_frameworks || [],
+          languages: p.languages || [],
+          frameworks: p.frameworks || [],
+          build_systems: (p.build_systems || []).map((b: any) => b.name || b),
+          test_frameworks: p.testing_frameworks || [],
         };
         setProfile(profileData);
       })

@@ -50,7 +50,7 @@ from app.dependency_analysis.validator import ValidationStatus as VS, validate_f
 
 log = logging.getLogger(__name__)
 
-_MAX_REGISTRY_WORKERS = 12   # I/O-bound: more threads = faster parallel lookups
+_MAX_REGISTRY_WORKERS = 25   # I/O-bound: more threads = faster parallel lookups
 
 
 class DependencyAnalysisService:
