@@ -427,9 +427,20 @@ class PythonRuffAdapter(MigrationAdapter):
         return snapshot
 
     def _find_ruff(self, workspace_path: str) -> str:
-        """Prefer ruff from workspace .venv; fall back to system ruff."""
+        """Prefer running virtualenv's ruff, then workspace .venv, then system ruff."""
+        import sys
+        
+        # 1. Check running backend virtual environment (where ruff is installed)
+        py_bin_dir = Path(sys.executable).parent
+        for candidate in [
+            py_bin_dir / "ruff.exe",
+            py_bin_dir / "ruff",
+        ]:
+            if candidate.exists():
+                return str(candidate)
+
         ws = Path(workspace_path)
-        # Walk up from workspace to find a .venv with ruff
+        # 2. Walk up from workspace to find a .venv with ruff
         for candidate in [
             ws / ".venv" / "Scripts" / "ruff.exe",
             ws / ".venv" / "bin" / "ruff",
@@ -439,6 +450,7 @@ class PythonRuffAdapter(MigrationAdapter):
             if candidate.exists():
                 return str(candidate)
         return "ruff"  # system ruff
+
 
     def _compute_diffs(self, before: dict, after: dict) -> List[FileChangeMetadata]:
         changed = []
