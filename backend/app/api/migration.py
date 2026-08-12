@@ -3,6 +3,7 @@ import asyncio
 import io
 import re
 import traceback
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -193,25 +194,29 @@ def _is_uuid(val: str) -> bool:
         return False
 
 
-def _resolve_project_name(ws: Path, project_id: str) -> str:
-    """Resolve original uploaded file name or Git repo name. Never returns raw UUID."""
-    # 1. Saved .project_name file
-    name_file = ws / ".project_name"
-    if name_file.exists():
-        val = name_file.read_text(encoding="utf-8").strip()
-        if val and val != "unnamed" and not _is_uuid(val):
-            return val
+def _resolve_project_name(ws: Path, result_obj: any) -> str:
+    """Resolve original uploaded file name or Git repo name safely."""
+    try:
+        # 1. Saved .project_name file
+        name_file = ws / ".project_name"
+        if name_file.exists():
+            val = name_file.read_text(encoding="utf-8").strip()
+            if val and val != "unnamed" and not _is_uuid(val):
+                return val
 
-    # 2. Check single top-level directory inside workspace
-    subdirs = [d.name for d in ws.iterdir() if d.is_dir() and not d.name.startswith(".")]
-    if len(subdirs) == 1:
-        return subdirs[0]
+        # 2. Check single top-level directory inside workspace
+        if ws.exists():
+            subdirs = [d.name for d in ws.iterdir() if d.is_dir() and not d.name.startswith(".")]
+            if len(subdirs) == 1:
+                return subdirs[0]
 
-    # 3. Non-UUID project_id
-    if project_id and not _is_uuid(project_id):
-        return project_id
+        # 3. Non-UUID project_id
+        pid = getattr(result_obj, "project_id", None) or (result_obj.get("project_id") if isinstance(result_obj, dict) else None)
+        if pid and not _is_uuid(str(pid)):
+            return str(pid)
+    except Exception:
+        pass
 
-    # 4. Clean fallback
     return "modernized-application"
 
 
@@ -223,41 +228,60 @@ async def download_modernized_zip(result_id: str):
     """
     result_data = _results.get(result_id)
     if not result_data:
-        raise HTTPException(status_code=404, detail="Result not found.")
+        raise HTTPException(status_code=404, detail="Result not found or server was restarted. Please re-run the migration.")
 
-    workspace_path = result_data["plan_data"].get("workspace_path", "")
-    ws = Path(workspace_path)
-    if not ws.exists():
-        raise HTTPException(status_code=404, detail="Workspace no longer exists — it may have been cleaned up.")
+    try:
+        workspace_path = result_data["plan_data"].get("workspace_path", "")
+        ws = Path(workspace_path)
+        if not ws.exists():
+            raise HTTPException(status_code=404, detail="Workspace no longer exists — it may have been cleaned up.")
 
-    _SKIP_IN_ZIP = {".git", "__pycache__", ".venv", "venv", "node_modules", ".pytest_cache"}
+        _SKIP_IN_ZIP = {"__pycache__", "node_modules", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+        _SKIP_IN_ZIP_STARTS = {".git", ".venv", "venv", ".venv-broken"}
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        for file_path in sorted(ws.rglob("*")):
-            if not file_path.is_file():
-                continue
-            # Skip hidden/build directories
-            if any(part in _SKIP_IN_ZIP for part in file_path.parts):
-                continue
-            arcname = str(file_path.relative_to(ws))
-            zf.write(file_path, arcname)
-    buf.seek(0)
+        # Resolve project name early so we can use it as the root folder prefix
+        raw_name_pre = _resolve_project_name(ws, result_data.get("result"))
+        clean_root = re.sub(r'[\(\)\s]+', '-', raw_name_pre).strip('-')
+        clean_root = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_root) or "application"
+        # Remove any trailing -1 from ZIP filenames like 'architecture-discovery-main--1-'
+        clean_root = re.sub(r'-+$', '', clean_root)
 
-    raw_name = _resolve_project_name(ws, result_data["result"].project_id)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for file_path in sorted(ws.rglob("*")):
+                if not file_path.is_file():
+                    continue
+                rel = file_path.relative_to(ws)
+                parts = rel.parts
+                # Skip hidden files like .project_name at root
+                if parts[0].startswith('.'):
+                    continue
+                # Skip known build/tool directories
+                if any(p in _SKIP_IN_ZIP for p in parts):
+                    continue
+                if any(p.startswith(tuple(_SKIP_IN_ZIP_STARTS)) for p in parts):
+                    continue
+                # Wrap inside original project root folder to preserve structure
+                arcname = f"{clean_root}/{rel.as_posix()}"
+                zf.write(file_path, arcname)
+        buf.seek(0)
 
-    # Sanitize for clean filename (e.g. architecture-discovery-main (1) -> architecture-discovery-main-modernized.zip)
-    clean_name = re.sub(r'[\(\)\s]+', '-', raw_name).strip('-')
-    clean_name = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_name)
-    if clean_name.lower().endswith("-modernized"):
-        filename = f"{clean_name}.zip"
-    else:
-        filename = f"{clean_name}-modernized.zip"
+        # Use the same clean_root for the download filename
+        if clean_root.lower().endswith("-modernized"):
+            filename = f"{clean_root}.zip"
+        else:
+            filename = f"{clean_root}-modernized.zip"
 
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {e}\n{traceback.format_exc()[:800]}")
+
 
 
