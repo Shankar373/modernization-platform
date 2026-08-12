@@ -159,10 +159,20 @@ async def download_checkpoint_workspace(workspace_path: str, project_id: str):
 
     try:
         # Determine clean project name
-        raw_name = ws.name
+        proj_name_file = ws / ".project_name"
+        if proj_name_file.exists():
+            raw_name = proj_name_file.read_text(encoding="utf-8").strip()
+        else:
+            raw_name = ws.name
+
         clean_root = re.sub(r'[\(\)\s]+', '-', raw_name).strip('-')
         clean_root = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_root) or "workspace"
-        filename = f"{clean_root}-checkpoint.zip"
+        
+        # Suffix with modernized
+        if not clean_root.lower().endswith("-modernized"):
+            filename = f"{clean_root}-modernized.zip"
+        else:
+            filename = f"{clean_root}.zip"
 
         _SKIP_IN_ZIP = {"__pycache__", "node_modules", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
         _SKIP_IN_ZIP_STARTS = {".git", ".venv", "venv", ".venv-broken"}
