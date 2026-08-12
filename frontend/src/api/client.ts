@@ -106,3 +106,64 @@ export const downloadModernizedZip = (resultId: string) => {
   link.click();
   document.body.removeChild(link);
 };
+
+// ── Dependency Analysis (with plan_only support) ───────────────────────────────
+
+/**
+ * Run the dependency analysis in PLAN-ONLY mode:
+ * detect + query registries + compare — but do NOT write any files.
+ * Use for the "Dependency Update Review" step.
+ */
+export const planDependencyAnalysis = (workspacePath: string, projectId: string) =>
+  API.post('/dependency-analysis', {
+    workspace_path: workspacePath,
+    project_id: projectId,
+    force_refresh: true,
+    plan_only: true,
+  });
+
+/**
+ * Apply approved dependency updates to disk.
+ * Runs the full pipeline (detect → compare → apply → validate).
+ */
+export const applyDependencyUpdates = (workspacePath: string, projectId: string) =>
+  API.post('/dependency-analysis', {
+    workspace_path: workspacePath,
+    project_id: projectId,
+    force_refresh: true,
+    plan_only: false,
+  });
+
+// ── Recipe API ─────────────────────────────────────────────────────────────────
+
+/** Fetch AI-powered recipe recommendations for a project. */
+export const getRecipeRecommendations = (data: {
+  project_id: string;
+  workspace_path: string;
+  languages: string[];
+  frameworks: string[];
+  detected_deps: string[];
+  has_tests: boolean;
+  has_ci: boolean;
+}) => API.post('/recipes/recommend', data);
+
+/** Detect conflicts and compute execution order for selected recipes. */
+export const analyzeRecipeConflicts = (selectedRecipeIds: string[]) =>
+  API.post('/recipes/conflicts', { selected_recipe_ids: selectedRecipeIds });
+
+/** Generate the final Migration Plan. */
+export const generateMigrationPlan = (data: {
+  project_id: string;
+  workspace_path: string;
+  selected_recipe_ids: string[];
+  approved_dep_updates: unknown[];
+}) => API.post('/recipes/plan', data);
+
+// ── Git Checkpoint ─────────────────────────────────────────────────────────────
+
+/** Create a git checkpoint (commit) in the workspace. */
+export const createGitCheckpoint = (data: {
+  workspace_path: string;
+  project_id: string;
+  message?: string;
+}) => API.post('/git/checkpoint', data);

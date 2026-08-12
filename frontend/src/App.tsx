@@ -5,6 +5,7 @@ import './index.css';
 import Dashboard from './pages/Dashboard';
 import NewMigration from './pages/NewMigration';
 import Analysis from './pages/Analysis';
+import Pipeline from './pages/Pipeline';
 import MigrationPlan from './pages/MigrationPlan';
 import Execution from './pages/Execution';
 import Results from './pages/Results';
@@ -46,6 +47,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/new" element={<NewMigration />} />
+              <Route path="/pipeline/:projectId" element={<Pipeline />} />
               <Route path="/analyze/:projectId" element={<Analysis />} />
               <Route path="/plan/:projectId" element={<MigrationPlan />} />
               <Route path="/execute/:planId" element={<Execution />} />

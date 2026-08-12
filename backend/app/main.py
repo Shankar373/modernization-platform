@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
-from app.api import health, ingestion, analysis, migration, reports, capabilities, dependency_analysis
+from app.api import health, ingestion, analysis, migration, reports, capabilities, dependency_analysis, recipes, git_checkpoint
 from app.db.session import init_db
 
 
@@ -49,3 +49,5 @@ app.include_router(capabilities.router, prefix="/api/v1", tags=["Capabilities"])
 app.include_router(migration.router, prefix="/api/v1", tags=["Migration"])
 app.include_router(reports.router, prefix="/api/v1", tags=["Reports"])
 app.include_router(dependency_analysis.router, prefix="/api/v1", tags=["Dependency Analysis"])
+app.include_router(recipes.router, prefix="/api/v1", tags=["Recipes"])
+app.include_router(git_checkpoint.router, prefix="/api/v1", tags=["Git Checkpoint"])

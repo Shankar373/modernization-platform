@@ -34,7 +34,7 @@ export default function NewMigration() {
       await analyzeRepo(workspace_path, project_id);
       // Store in sessionStorage for next page
       sessionStorage.setItem(`project_${project_id}`, JSON.stringify(res.data));
-      navigate(`/analyze/${project_id}?wp=${encodeURIComponent(workspace_path)}`);
+      navigate(`/pipeline/${project_id}?wp=${encodeURIComponent(workspace_path)}`);
     } catch (e: any) {
       setError(e?.response?.data?.detail || e.message || 'Ingestion failed.');
     } finally {

@@ -63,10 +63,12 @@ class DependencyAnalysisService:
 
     # ── Public entry point ────────────────────────────────────────────────────
 
-    def analyze(self, workspace_path: str) -> DependencyAnalysisResult:
+    def analyze(self, workspace_path: str, plan_only: bool = False) -> DependencyAnalysisResult:
         """
         Run the complete pipeline and return a structured DependencyAnalysisResult.
-        Safe to call concurrently.
+
+        plan_only=True  → detect, parse, lookup, compare — but do NOT write any files.
+        plan_only=False → full pipeline including applying updates to disk.
         """
         result = DependencyAnalysisResult(workspace_path=workspace_path)
 
@@ -130,8 +132,10 @@ class DependencyAnalysisService:
                     f"{dep.name}: registry lookup failed or version invalid."
                 )
 
-        # Step 6 — apply updates
-        changed_files = self._apply_updates(workspace_path, all_deps, dep_files)
+        # Step 6 — apply updates (skip in plan_only mode)
+        changed_files: list[str] = []
+        if not plan_only:
+            changed_files = self._apply_updates(workspace_path, all_deps, dep_files)
         result.changed_files = changed_files
 
         # Step 7 — validate

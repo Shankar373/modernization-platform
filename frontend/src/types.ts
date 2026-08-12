@@ -167,3 +167,77 @@ export interface DependencyAnalysisResult {
   validation_errors: string[];
   warnings: string[];
 }
+
+// ── Recipe Types ──────────────────────────────────────────────────────────────
+
+export type RecipeCategory = 'upgrade' | 'style' | 'security' | 'performance';
+export type RecipeComplexity = 'low' | 'medium' | 'high';
+
+export interface Recipe {
+  id: string;
+  name: string;
+  description: string;
+  language: string;
+  category: RecipeCategory;
+  complexity: RecipeComplexity;
+  tags: string[];
+  requires: string[];
+  conflicts_with: string[];
+  score?: number;
+  recommended?: boolean;
+}
+
+export interface RecipeConflict {
+  recipe_a: string;
+  recipe_b: string;
+  severity: 'ERROR' | 'WARNING';
+  reason: string;
+  resolution: string;
+}
+
+export interface RecipePhase {
+  phase: number;
+  label: string;
+  recipes: Recipe[];
+  parallel: boolean;
+}
+
+export interface RecipeAnalysisResult {
+  conflicts: RecipeConflict[];
+  has_conflicts: boolean;
+  ordered_recipes: Recipe[];
+  auto_added_recipes: Recipe[];
+  execution_phases: RecipePhase[];
+}
+
+export interface MigrationPlan {
+  id: string;
+  project_id: string;
+  workspace_path: string;
+  created_at: string;
+  phases: RecipePhase[];
+  selected_recipes: Recipe[];
+  dep_updates_count: number;
+  approved_dep_updates: DependencyUpdateAction[];
+  estimated_files_changed: number;
+  complexity_score: number;
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+  git_checkpoint_message: string;
+  summary: string;
+}
+
+// ── Git Checkpoint Types ───────────────────────────────────────────────────────
+
+export interface GitCheckpointResult {
+  status: 'success' | 'nothing_to_commit';
+  commit_hash: string | null;
+  commit_hash_full?: string;
+  commit_message?: string;
+  timestamp: string;
+  files_committed: number;
+  branch: string;
+  is_new_repo: boolean;
+  stats?: { insertions: number; deletions: number; files: number };
+  message?: string;
+}
+
