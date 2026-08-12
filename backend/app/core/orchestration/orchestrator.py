@@ -84,6 +84,12 @@ _EXT_TO_LANG: dict[str, set[str]] = {
 
 
 
+def _is_skip_dir(p: str) -> bool:
+    pl = p.lower()
+    return (pl in {"node_modules", ".venv", "venv", "__pycache__", ".git", "dist", "build", ".next", ".pytest_cache", ".mypy_cache", "site-packages", "vendor"}
+            or pl.startswith(".venv") or "venv" in pl or "site-packages" in pl)
+
+
 def _collect_extensions(workspace_path: str) -> frozenset[str]:
     """
     Single O(n) filesystem walk → frozenset of file extensions present.
@@ -92,9 +98,10 @@ def _collect_extensions(workspace_path: str) -> frozenset[str]:
     exts: set[str] = set()
     ws = Path(workspace_path)
     for f in ws.rglob("*"):
-        if f.is_file() and not any(s in f.parts for s in _SKIP_SCAN_DIRS):
+        if f.is_file() and not any(_is_skip_dir(part) for part in f.parts):
             exts.add(f.suffix.lower())
     return frozenset(exts)
+
 
 
 class MigrationOrchestrator:

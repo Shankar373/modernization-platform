@@ -170,9 +170,13 @@ class UniversalScanner:
         return profile
 
     def _is_ignored(self, f: Path) -> bool:
-        parts = f.parts
-        ignore_dirs = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", "target", "build", "dist"}
-        return any(p in ignore_dirs for p in parts)
+        ignore_dirs = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", "target", "build", "dist", "site-packages", "vendor", ".pytest_cache", ".next"}
+        for p in f.parts:
+            pl = p.lower()
+            if pl in ignore_dirs or pl.startswith(".venv") or "venv" in pl or "site-packages" in pl:
+                return True
+        return False
+
 
     def _detect_languages(self, ws: Path, files: List[Path], ext_counts: Dict[str, int]) -> List[DetectedLanguage]:
         detected = []
