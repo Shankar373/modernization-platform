@@ -167,3 +167,13 @@ export const createGitCheckpoint = (data: {
   project_id: string;
   message?: string;
 }) => API.post('/git/checkpoint', data);
+
+/** Download the checkpointed workspace as a ZIP file. */
+export const downloadCheckpointZip = (workspacePath: string, projectId: string) => {
+  const link = document.createElement('a');
+  link.href = `/api/v1/git/checkpoint/download?workspace_path=${encodeURIComponent(workspacePath)}&project_id=${encodeURIComponent(projectId)}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+

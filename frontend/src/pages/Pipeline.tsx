@@ -8,6 +8,7 @@ import {
   analyzeRecipeConflicts,
   generateMigrationPlan,
   createGitCheckpoint,
+  downloadCheckpointZip,
 } from '../api/client';
 import type {
   TechnologyProfile,
@@ -673,7 +674,17 @@ function PlanStep({ plan, onContinue }: { plan: MigrationPlan | null; onContinue
   );
 }
 
-function CheckpointStep({ result, error }: { result: GitCheckpointResult | null; error: string | null }) {
+function CheckpointStep({
+  result,
+  error,
+  workspacePath,
+  projectId,
+}: {
+  result: GitCheckpointResult | null;
+  error: string | null;
+  workspacePath: string;
+  projectId: string;
+}) {
   if (!result && !error) {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
@@ -702,6 +713,11 @@ function CheckpointStep({ result, error }: { result: GitCheckpointResult | null;
         <h3 style={{ marginBottom: 8 }}>Working Tree is Clean</h3>
         <p className="text-muted">No changes to commit — checkpoint acknowledged.</p>
         <p className="text-muted text-sm" style={{ marginTop: 8 }}>Branch: <code>{result!.branch}</code></p>
+        <div style={{ marginTop: 24 }}>
+          <button className="btn btn-primary" onClick={() => downloadCheckpointZip(workspacePath, projectId)}>
+            📦 Download Workspace ZIP
+          </button>
+        </div>
       </div>
     );
   }
@@ -757,12 +773,18 @@ function CheckpointStep({ result, error }: { result: GitCheckpointResult | null;
         )}
       </div>
 
-      <div style={{ padding: 16, borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
+      <div style={{ padding: 16, borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', marginBottom: 20 }}>
         <h4 style={{ color: '#10b981', marginBottom: 8, fontSize: 14 }}>✅ Milestone Complete: Dashboard → Git Checkpoint</h4>
         <p className="text-muted text-sm">
           All steps completed successfully. A git checkpoint has been created before any transformation.
           The next milestone would implement OpenRewrite, Roslyn, or language-specific transformation engines.
         </p>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button className="btn btn-primary" onClick={() => downloadCheckpointZip(workspacePath, projectId)}>
+          📦 Download Workspace ZIP
+        </button>
       </div>
     </div>
   );
@@ -1007,7 +1029,14 @@ export default function Pipeline() {
         return <PlanStep plan={plan} onContinue={() => go('checkpointing')} />;
       case 'checkpointing':
       case 'done':
-        return <CheckpointStep result={checkpointResult} error={checkpointError} />;
+        return (
+          <CheckpointStep
+            result={checkpointResult}
+            error={checkpointError}
+            workspacePath={workspacePath}
+            projectId={projectId || ''}
+          />
+        );
     }
   };
 

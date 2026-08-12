@@ -140,3 +140,61 @@ async def create_git_checkpoint(request: GitCheckpointRequest):
             status_code=500,
             detail=f"Git checkpoint failed: {e}",
         )
+
+
+@router.get("/git/checkpoint/download")
+async def download_checkpoint_workspace(workspace_path: str, project_id: str):
+    """
+    Download the current checkpointed workspace as a ZIP file.
+    Skips build artifacts, lockfiles, venv, and large metadata directories.
+    """
+    import io
+    import re
+    import zipfile
+    from fastapi.responses import StreamingResponse
+
+    ws = Path(workspace_path)
+    if not ws.exists():
+        raise HTTPException(status_code=404, detail="Workspace path does not exist.")
+
+    try:
+        # Determine clean project name
+        raw_name = ws.name
+        clean_root = re.sub(r'[\(\)\s]+', '-', raw_name).strip('-')
+        clean_root = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_root) or "workspace"
+        filename = f"{clean_root}-checkpoint.zip"
+
+        _SKIP_IN_ZIP = {"__pycache__", "node_modules", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+        _SKIP_IN_ZIP_STARTS = {".git", ".venv", "venv", ".venv-broken"}
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for file_path in sorted(ws.rglob("*")):
+                if not file_path.is_file():
+                    continue
+                rel = file_path.relative_to(ws)
+                parts = rel.parts
+                # Skip hidden files
+                if parts[0].startswith('.'):
+                    continue
+                # Skip known build/tool directories
+                if any(p in _SKIP_IN_ZIP for p in parts):
+                    continue
+                if any(p.startswith(tuple(_SKIP_IN_ZIP_STARTS)) for p in parts):
+                    continue
+
+                arcname = f"{clean_root}/{rel.as_posix()}"
+                zf.write(file_path, arcname)
+        
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate workspace download: {e}"
+        )
+
