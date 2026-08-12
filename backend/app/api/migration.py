@@ -1,6 +1,7 @@
 """Migration API — plan, dry run, approve, execute, report."""
 import asyncio
 import io
+import re
 import traceback
 import zipfile
 from pathlib import Path
@@ -213,11 +214,24 @@ async def download_modernized_zip(result_id: str):
             zf.write(file_path, arcname)
     buf.seek(0)
 
-    project_id = result_data["result"].project_id or "modernized"
-    filename = f"{project_id[:8]}-modernized.zip"
+    # Resolve clean filename based on uploaded project name
+    name_file = ws / ".project_name"
+    if name_file.exists():
+        raw_name = name_file.read_text(encoding="utf-8").strip()
+    else:
+        raw_name = result_data["result"].project_id or "application"
+
+    # Sanitize for clean filename (e.g. architecture-discovery-main (1) -> architecture-discovery-main-modernized.zip)
+    clean_name = re.sub(r'[\(\)\s]+', '-', raw_name).strip('-')
+    clean_name = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_name)
+    if clean_name.lower().endswith("-modernized"):
+        filename = f"{clean_name}.zip"
+    else:
+        filename = f"{clean_name}-modernized.zip"
 
     return StreamingResponse(
         buf,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+

@@ -196,29 +196,20 @@ export default function Results() {
         </div>
       )}
 
-      {/* Actions */}
+      {/* Action buttons */}
       <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
         {changed.length > 0 && (
           <button className="btn btn-primary" onClick={() => navigate(`/results/${resultId}/changes`)}>
             📄 Full Code Diff ({changed.length} files)
           </button>
         )}
-        <button className="btn btn-ghost" onClick={() => {
-          const blob = new Blob([JSON.stringify(report || result, null, 2)], { type: 'application/json' });
-          const url  = URL.createObjectURL(blob);
-          const a    = document.createElement('a');
-          a.href     = url;
-          a.download = `migration-report-${resultId?.slice(0, 8)}.json`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }}>⬇ Download Report (JSON)</button>
         <button
           id="btn-download-zip"
           className="btn btn-primary"
           style={{ background: 'linear-gradient(135deg,#7c3aed,#3b82f6)', border: 'none' }}
           onClick={() => resultId && downloadModernizedZip(resultId)}
         >
-          📦 Download Modernized ZIP
+          📦 Download Modernized Application (ZIP)
         </button>
         <button className="btn btn-ghost" onClick={() => navigate('/')}>← Dashboard</button>
         <button className="btn btn-ghost" onClick={() => navigate('/history')}>⟳ History</button>

@@ -48,9 +48,9 @@ export const getChangedFiles = (resultId: string) => API.get(`/migration/result/
 export const downloadModernizedZip = (resultId: string) => {
   const link = document.createElement('a');
   link.href = `/api/v1/migration/result/${resultId}/download`;
-  link.download = `${resultId.slice(0, 8)}-modernized.zip`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 };
+
 

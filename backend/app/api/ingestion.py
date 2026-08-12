@@ -35,8 +35,19 @@ async def ingest_zip(
 
     content = await file.read()
     try:
-        project_id, workspace_path = _ingestion.create_workspace(project_name)
+        # Use uploaded file basename if project_name is default "unnamed"
+        clean_filename = file.filename[:-4] if file.filename.endswith(".zip") else file.filename
+        effective_name = project_name if project_name and project_name != "unnamed" else clean_filename
+
+        project_id, workspace_path = _ingestion.create_workspace(effective_name)
         _ingestion.ingest_zip(content, workspace_path)
+
+        # Save project name for download naming
+        try:
+            (Path(workspace_path) / ".project_name").write_text(effective_name, encoding="utf-8")
+        except Exception:
+            pass
+
         return IngestResponse(
             project_id=project_id,
             workspace_path=workspace_path,
@@ -45,6 +56,7 @@ async def ingest_zip(
         )
     except SecurityError as e:
         raise HTTPException(status_code=400, detail=f"Security error: {e}")
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e}")
 
