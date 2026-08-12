@@ -30,6 +30,8 @@ beautifulsoup4==4.12.3
 ruamel.yaml==0.18.6
 mdformat==0.7.21
 tomlkit==0.13.2
+packaging>=24.0        # PEP 440 version parsing & specifier evaluation
+
 
 
 

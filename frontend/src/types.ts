@@ -109,3 +109,61 @@ export interface DryRunAllResult {
   migration_profile: string;
   summary: string;
 }
+
+// ── Dependency Analysis Types ──────────────────────────────────────────────
+
+export type DependencyStatus =
+  | 'UP_TO_DATE'
+  | 'UPDATE_AVAILABLE'
+  | 'CONSTRAINT_BLOCKED'
+  | 'LOOKUP_FAILED'
+  | 'INVALID_VERSION';
+
+export type DependencyEcosystem = 'python' | 'node' | 'java' | 'dotnet' | 'unknown';
+
+export interface Dependency {
+  name: string;
+  current_version: string | null;
+  version_constraint: string | null;
+  latest_stable_version: string | null;
+  source_file: string;
+  ecosystem: DependencyEcosystem;
+  status: DependencyStatus;
+  update_required: boolean;
+  reason: string;
+  extras: string | null;
+  environment_marker: string | null;
+}
+
+export interface DependencyFile {
+  path: string;
+  ecosystem: DependencyEcosystem;
+  is_lockfile: boolean;
+}
+
+export interface DependencyUpdateAction {
+  dependency_name: string;
+  source_file: string;
+  ecosystem: DependencyEcosystem;
+  current_version: string | null;
+  proposed_version: string;
+  action: string;
+  reason: string;
+}
+
+export interface DependencyAnalysisResult {
+  workspace_path: string;
+  project_id: string;
+  cached: boolean;
+  dependency_files: DependencyFile[];
+  dependencies: Dependency[];
+  up_to_date: string[];
+  outdated: string[];
+  constraint_blocked: string[];
+  lookup_failed: string[];
+  proposed_updates: DependencyUpdateAction[];
+  changed_files: string[];
+  validation_status: 'PASSED' | 'FAILED' | 'SKIPPED';
+  validation_errors: string[];
+  warnings: string[];
+}

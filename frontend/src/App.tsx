@@ -10,12 +10,14 @@ import Execution from './pages/Execution';
 import Results from './pages/Results';
 import CodeChanges from './pages/CodeChanges';
 import History from './pages/History';
+import DependencyAnalysisPage from './pages/DependencyAnalysis';
 
 const queryClient = new QueryClient();
 
 const NAV = [
   { to: '/', label: '⬡ Dashboard', exact: true },
   { to: '/new', label: '＋ New Migration' },
+  { to: '/dependencies', label: '🔍 Dependencies' },
   { to: '/history', label: '⟳ History' },
 ];
 
@@ -50,6 +52,7 @@ export default function App() {
               <Route path="/results/:resultId" element={<Results />} />
               <Route path="/results/:resultId/changes" element={<CodeChanges />} />
               <Route path="/history" element={<History />} />
+              <Route path="/dependencies" element={<DependencyAnalysisPage />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>

@@ -74,6 +74,26 @@ export const approveAndExecute = (
     approved: true,
   });
 
+/**
+ * Run the full dependency analysis pipeline on a workspace.
+ * Detects dependency files, queries registries for latest stable versions,
+ * compares, generates update plan, applies updates, and validates.
+ */
+export const runDependencyAnalysis = (
+  workspacePath: string,
+  projectId: string,
+  forceRefresh = false
+) =>
+  API.post('/dependency-analysis', {
+    workspace_path: workspacePath,
+    project_id: projectId,
+    force_refresh: forceRefresh,
+  });
+
+/** Clear the cached dependency analysis result for a workspace. */
+export const clearDependencyCache = (workspacePath: string) =>
+  API.get('/dependency-analysis/cache-clear', { params: { workspace_path: workspacePath } });
+
 export const getResult       = (resultId: string) => API.get(`/migration/result/${resultId}`);
 export const getReport       = (resultId: string) => API.get(`/migration/result/${resultId}/report`);
 export const getChangedFiles = (resultId: string) => API.get(`/migration/result/${resultId}/files`);
