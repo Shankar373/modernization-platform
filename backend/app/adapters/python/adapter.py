@@ -240,45 +240,68 @@ class PythonRuffAdapter(MigrationAdapter):
     # ── Migration ─────────────────────────────────────────────────────────────
 
     def migrate(self, workspace_path: str, plan: MigrationPlan) -> MigrationResult:
-        """Execute Ruff fix + format. Captures real diffs."""
+        """Execute Ruff fix + format. Captures real diffs.
+        
+        IMPORTANT: This adapter only runs ruff using a temporary config.
+        It NEVER creates or modifies pyproject.toml in the user's project.
+        The original project structure is fully preserved.
+        """
         ws = Path(workspace_path)
-        generator = PyprojectGenerator()
-
         target_version = plan.targets[0].target_version if plan.targets else "3.11"
-        generator.generate(workspace_path=workspace_path, target_version=target_version, plan=plan)
+
+        # Use a TEMP ruff config file that is isolated to our temp dir, NOT the workspace
+        # This ensures we never inject pyproject.toml into the user's project
+        import tempfile
+        tmp_dir = Path(tempfile.mkdtemp(prefix="ruff_cfg_"))
+        tmp_ruff_config = tmp_dir / "ruff.toml"
+        
+        generator = PyprojectGenerator()
+        generator.generate(
+            workspace_path=workspace_path,
+            target_version=target_version,
+            plan=plan,
+            output_path=str(tmp_ruff_config),
+        )
 
         # Snapshot before
         before_state = self._snapshot_py_files(ws)
         timeline = [{"step": "Migration started", "status": "running", "ts": datetime.utcnow().isoformat()}]
         warnings = []
 
-        # Step 1: ruff check --fix
-        if any(s.capability == "python-lint-autofix" for s in plan.steps):
-            ruff = self._find_ruff(workspace_path)
-            cmd = [ruff, "check", "--fix"]
-            if plan.profile == MigrationProfile.AGGRESSIVE:
-                cmd.append("--unsafe-fixes")
-            cmd.append(workspace_path)
-            try:
-                subprocess.run(
-                    cmd,
-                    capture_output=True, text=True, timeout=120,
-                )
-                timeline.append({"step": "Ruff check --fix", "status": "completed", "ts": datetime.utcnow().isoformat()})
-            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-                warnings.append(f"Ruff fix failed: {e}")
+        try:
 
-        # Step 2: ruff format
-        if any(s.capability == "python-formatting" for s in plan.steps):
-            try:
+            # Step 1: ruff check --fix
+            if any(s.capability == "python-lint-autofix" for s in plan.steps):
                 ruff = self._find_ruff(workspace_path)
-                subprocess.run(
-                    [ruff, "format", workspace_path],
-                    capture_output=True, text=True, timeout=120,
-                )
-                timeline.append({"step": "Ruff format", "status": "completed", "ts": datetime.utcnow().isoformat()})
-            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-                warnings.append(f"Ruff format failed: {e}")
+                cmd = [ruff, "check", "--fix", "--config", str(tmp_ruff_config)]
+                if plan.profile == MigrationProfile.AGGRESSIVE:
+                    cmd.append("--unsafe-fixes")
+                cmd.append(workspace_path)
+                try:
+                    subprocess.run(
+                        cmd,
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    timeline.append({"step": "Ruff check --fix", "status": "completed", "ts": datetime.utcnow().isoformat()})
+                except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                    warnings.append(f"Ruff fix failed: {e}")
+
+            # Step 2: ruff format
+            if any(s.capability == "python-formatting" for s in plan.steps):
+                try:
+                    ruff = self._find_ruff(workspace_path)
+                    subprocess.run(
+                        [ruff, "format", "--config", str(tmp_ruff_config), workspace_path],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    timeline.append({"step": "Ruff format", "status": "completed", "ts": datetime.utcnow().isoformat()})
+                except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                    warnings.append(f"Ruff format failed: {e}")
+        finally:
+            # Clean up the temp config dir — never leave artifacts in user's workspace
+            import shutil
+            shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
 
         after_state = self._snapshot_py_files(ws)
         changed_files = self._compute_diffs(before_state, after_state)
