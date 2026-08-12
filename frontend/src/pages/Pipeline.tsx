@@ -508,6 +508,17 @@ function RecipeSelectionStep({
     return acc;
   }, {});
 
+  const toggleAll = () => {
+    const allSelected = recommendations.every(r => selectedIds.has(r.id));
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(recommendations.map(r => r.id)));
+    }
+  };
+
+  const allSelected = recommendations.length > 0 && recommendations.every(r => selectedIds.has(r.id));
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -515,9 +526,14 @@ function RecipeSelectionStep({
           <h3 style={{ marginBottom: 4 }}>Select Migration Recipes</h3>
           <p className="text-muted text-sm">{selectedIds.size} recipe{selectedIds.size !== 1 ? 's' : ''} selected. Recommended ones are pre-selected.</p>
         </div>
-        <button className="btn btn-primary" onClick={onContinue} disabled={selectedIds.size === 0}>
-          Analyse {selectedIds.size} Recipe{selectedIds.size !== 1 ? 's' : ''} →
-        </button>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={toggleAll}>
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </button>
+          <button className="btn btn-primary" onClick={onContinue} disabled={selectedIds.size === 0}>
+            Analyse {selectedIds.size} Recipe{selectedIds.size !== 1 ? 's' : ''} →
+          </button>
+        </div>
       </div>
 
       {Object.entries(grouped).map(([group, recipes]) => (
