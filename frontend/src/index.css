@@ -1,27 +1,29 @@
 :root {
-  --color-bg: #0a0e1a;
-  --color-surface: #111827;
-  --color-surface-2: #1a2235;
-  --color-border: #1e2d45;
-  --color-accent: #6366f1;
-  --color-accent-2: #818cf8;
+  --color-bg: #0b0f19;
+  --color-surface: #111c24;
+  --color-surface-2: #172430;
+  --color-border: #1d3040;
+  --color-accent: #248888;          /* SystemaOps Teal */
+  --color-accent-2: #32a1a1;
   --color-success: #10b981;
-  --color-warning: #f59e0b;
+  --color-warning: #f2bd22;         /* SystemaOps Gold */
   --color-danger: #ef4444;
-  --color-text: #e2e8f0;
-  --color-text-muted: #64748b;
-  --color-text-dim: #334155;
+  --color-text: #f1f5f9;
+  --color-text-muted: #8ca2b0;
+  --color-text-dim: #475d6b;
+  --color-systema-purple: #714B67;  /* Odoo Header Purple */
+  --color-systema-gold: #f2bd22;
   --color-java: #f97316;
   --color-python: #3b82f6;
   --color-available: #10b981;
-  --color-partial: #f59e0b;
+  --color-partial: #f2bd22;
   --color-assessment: #8b5cf6;
   --color-unavailable: #475569;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --font-sans: 'Inter', -apple-system, sans-serif;
   --radius: 8px;
   --radius-lg: 12px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow: 0 4px 24px rgba(0,0,0,0.5);
   --transition: 0.2s ease;
 }
 
@@ -45,7 +47,50 @@ h2 { font-size: 22px; }
 h3 { font-size: 17px; }
 
 /* ── Layout ──────────────────────────────────────────────────────────────── */
-.app-shell { display: flex; min-height: 100vh; }
+.top-bar {
+  height: 48px;
+  background: var(--color-systema-purple);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 100;
+}
+
+.top-bar-logo {
+  display: flex;
+  align-items: center;
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+}
+
+.user-badge {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-shell {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - 48px);
+  overflow: hidden;
+}
 
 .sidebar {
   width: 240px;
@@ -54,7 +99,7 @@ h3 { font-size: 17px; }
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  padding: 24px 0;
+  padding: 16px 0;
   gap: 4px;
 }
 

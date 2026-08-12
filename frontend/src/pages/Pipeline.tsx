@@ -159,7 +159,11 @@ function DiscoveryStep({ profile, onContinue }: { profile: TechnologyProfile | n
         </div>
       )}
 
-      <AutoProceedBar seconds={3} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to Project Profile →
+        </button>
+      </div>
     </div>
   );
 }
@@ -199,7 +203,11 @@ function ProfileStep({ profile, onContinue }: { profile: TechnologyProfile | nul
         </div>
       </div>
 
-      <AutoProceedBar seconds={3} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to Dependency Detection →
+        </button>
+      </div>
     </div>
   );
 }
@@ -244,7 +252,11 @@ function DepDetectionStep({ depResult, onContinue }: { depResult: DependencyAnal
         ))}
         {depResult.dependency_files.length === 0 && <p className="text-muted">No dependency files found in workspace.</p>}
       </div>
-      <AutoProceedBar seconds={2} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to Version Detection →
+        </button>
+      </div>
     </div>
   );
 }
@@ -284,7 +296,11 @@ function VersionDetectionStep({ depResult, onContinue }: { depResult: Dependency
           {depResult.dependencies.length > 30 && <p className="text-muted text-sm" style={{ marginTop: 8 }}>…and {depResult.dependencies.length - 30} more</p>}
         </div>
       </div>
-      <AutoProceedBar seconds={2} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to Dependency Review →
+        </button>
+      </div>
     </div>
   );
 }
@@ -402,7 +418,11 @@ function DepApplyingStep({ applyResult, onContinue }: { applyResult: DependencyA
           </div>
         )}
       </div>
-      <AutoProceedBar seconds={2} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to AI Recommendations →
+        </button>
+      </div>
     </div>
   );
 }
@@ -441,7 +461,11 @@ function AIRecommendingStep({ recommendations, onContinue }: { recommendations: 
           {others.map(r => <RecipeRow key={r.id} recipe={r} />)}
         </div>
       )}
-      <AutoProceedBar seconds={3} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to Recipe Selection →
+        </button>
+      </div>
     </div>
   );
 }
@@ -584,7 +608,11 @@ function RecipeAnalyzingStep({ analysis, onContinue }: { analysis: RecipeAnalysi
         ))}
       </div>
 
-      <AutoProceedBar seconds={2} onDone={onContinue} />
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onContinue}>
+          Proceed to Conflict Resolution →
+        </button>
+      </div>
     </div>
   );
 }
@@ -608,7 +636,11 @@ function ConflictResolutionStep({
           <h3 style={{ marginBottom: 8 }}>No Conflicts Detected</h3>
           <p className="text-muted">All selected recipes are compatible. Proceeding to plan generation.</p>
         </div>
-        <AutoProceedBar seconds={2} onDone={onContinue} />
+        <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn btn-primary" onClick={onContinue}>
+            Proceed to Migration Plan →
+          </button>
+        </div>
       </div>
     );
   }
