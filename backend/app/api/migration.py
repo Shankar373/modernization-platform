@@ -185,6 +185,36 @@ async def get_changed_files(result_id: str):
     }
 
 
+def _is_uuid(val: str) -> bool:
+    try:
+        uuid.UUID(val)
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_project_name(ws: Path, project_id: str) -> str:
+    """Resolve original uploaded file name or Git repo name. Never returns raw UUID."""
+    # 1. Saved .project_name file
+    name_file = ws / ".project_name"
+    if name_file.exists():
+        val = name_file.read_text(encoding="utf-8").strip()
+        if val and val != "unnamed" and not _is_uuid(val):
+            return val
+
+    # 2. Check single top-level directory inside workspace
+    subdirs = [d.name for d in ws.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    if len(subdirs) == 1:
+        return subdirs[0]
+
+    # 3. Non-UUID project_id
+    if project_id and not _is_uuid(project_id):
+        return project_id
+
+    # 4. Clean fallback
+    return "modernized-application"
+
+
 @router.get("/migration/result/{result_id}/download")
 async def download_modernized_zip(result_id: str):
     """
@@ -214,12 +244,7 @@ async def download_modernized_zip(result_id: str):
             zf.write(file_path, arcname)
     buf.seek(0)
 
-    # Resolve clean filename based on uploaded project name
-    name_file = ws / ".project_name"
-    if name_file.exists():
-        raw_name = name_file.read_text(encoding="utf-8").strip()
-    else:
-        raw_name = result_data["result"].project_id or "application"
+    raw_name = _resolve_project_name(ws, result_data["result"].project_id)
 
     # Sanitize for clean filename (e.g. architecture-discovery-main (1) -> architecture-discovery-main-modernized.zip)
     clean_name = re.sub(r'[\(\)\s]+', '-', raw_name).strip('-')
@@ -234,4 +259,5 @@ async def download_modernized_zip(result_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
 

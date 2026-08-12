@@ -65,8 +65,19 @@ async def ingest_zip(
 async def ingest_git(request: GitIngestRequest):
     """Clone a Git repository for analysis."""
     try:
-        project_id, workspace_path = _ingestion.create_workspace(request.project_name or "git-project")
+        # Extract repo name from Git URL (e.g. https://github.com/user/my-repo.git -> my-repo)
+        git_url_name = request.git_url.rstrip("/").split("/")[-1].removesuffix(".git")
+        effective_name = request.project_name if request.project_name and request.project_name != "unnamed" else git_url_name
+
+        project_id, workspace_path = _ingestion.create_workspace(effective_name)
         _ingestion.ingest_git(request.git_url, workspace_path, branch=request.branch or "main")
+
+        # Save project name for download naming
+        try:
+            (Path(workspace_path) / ".project_name").write_text(effective_name, encoding="utf-8")
+        except Exception:
+            pass
+
         return IngestResponse(
             project_id=project_id,
             workspace_path=workspace_path,
@@ -79,3 +90,4 @@ async def ingest_git(request: GitIngestRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Git ingestion failed: {e}")
+
