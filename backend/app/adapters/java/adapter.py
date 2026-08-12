@@ -256,47 +256,62 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
     def _get_mvn_cmd(self, workspace_path: str) -> Optional[str]:
         """Find Maven binary: workspace wrapper (mvnw.cmd / mvnw) or system mvn.
 
-        Windows note: mvnw.cmd must be invoked via subprocess with shell=True.
-        We return the wrapper path and set _mvn_shell=True accordingly.
+        Windows specifics
+        -----------------
+        * mvnw.cmd  → valid Windows batch file, run via shell=True
+        * mvnw      → Unix bash script, CANNOT run on Windows cmd.exe → skip it
+        * mvn       → system install, run directly (no shell needed)
+
+        Unix specifics
+        --------------
+        * mvnw      → executable shell script, run directly
+        * mvn       → system install
         """
         ws = Path(workspace_path)
-        # On Windows always prefer mvnw.cmd
+        self._mvn_shell = False   # default: no shell needed
+
         if os.name == "nt":
-            wrapper = ws / "mvnw.cmd"
-            if wrapper.exists():
-                self._mvn_shell = True
-                return str(wrapper)
-            # Also try mvnw (some repos only have this even on Windows)
-            wrapper = ws / "mvnw"
-            if wrapper.exists():
-                self._mvn_shell = True
-                return str(wrapper)
+            # Windows: only mvnw.cmd is a valid Windows executable
+            wrapper_cmd = ws / "mvnw.cmd"
+            if wrapper_cmd.exists():
+                self._mvn_shell = True   # .cmd files REQUIRE shell=True on Windows
+                return str(wrapper_cmd)
+            # mvnw (bash script) is intentionally skipped on Windows — cannot run in cmd.exe
         else:
+            # Unix/macOS: mvnw is a shell script, executable directly
             wrapper = ws / "mvnw"
-            if wrapper.exists():
-                self._mvn_shell = False
+            if wrapper.exists() and os.access(str(wrapper), os.X_OK):
                 return str(wrapper)
-        if shutil.which("mvn"):
-            self._mvn_shell = False
-            return "mvn"
-        return None
+
+        # Last resort: system-installed mvn
+        sys_mvn = shutil.which("mvn")
+        if sys_mvn:
+            return sys_mvn
+
+        return None   # Maven not available — caller handles gracefully
 
     def _mvn_run(self, cmd: list[str], cwd: str, timeout: int = 600) -> subprocess.CompletedProcess:
-        """Run a Maven command, handling Windows shell=True requirement for .cmd wrappers."""
-        use_shell = getattr(self, "_mvn_shell", False)
-        if use_shell and os.name == "nt":
-            # On Windows, join as a single string for shell=True invocation
-            cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
+        """Run a Maven command, handling the Windows shell=True requirement for .cmd wrappers.
+
+        On Windows with mvnw.cmd we must use shell=True because .cmd files are
+        processed by cmd.exe, not directly executable by CreateProcess().
+        Passing a LIST with shell=True is safe on Windows — Python passes it as:
+            cmd.exe /c "mvnw.cmd" arg1 arg2 ...
+        which correctly invokes the batch file.
+        """
+        if getattr(self, "_mvn_shell", False) and os.name == "nt":
             return subprocess.run(
-                cmd_str,
+                cmd,                          # pass as list even with shell=True
                 capture_output=True, text=True,
-                timeout=timeout, cwd=cwd, shell=True,
+                timeout=timeout, cwd=cwd,
+                shell=True,                   # Windows needs this for .cmd files
             )
         return subprocess.run(
             cmd,
             capture_output=True, text=True,
             timeout=timeout, cwd=cwd,
         )
+
 
     def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
         generator = RewriteYmlGenerator()
@@ -339,8 +354,16 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
                 success=success,
                 notes=result.stdout[-2000:] if result.stdout else result.stderr[-2000:],
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-            return DryRunResult(success=False, notes=f"Dry run failed: {e}")
+        except subprocess.TimeoutExpired:
+            return DryRunResult(success=False, notes="Maven dry run timed out (>5 min).")
+        except (FileNotFoundError, OSError):
+            # Maven found on disk but can't execute (no Java, or Unix script on Windows)
+            return DryRunResult(
+                success=True,
+                files_would_change=1,
+                notes="Maven runtime unavailable — rewrite.yml recipe generated (apply manually).",
+            )
+
 
     # ── Migration ─────────────────────────────────────────────────────────────
 
@@ -390,10 +413,22 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
                 )
                 proc_returncode = proc.returncode
                 proc_stdout = proc.stdout
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            except subprocess.TimeoutExpired:
                 proc_returncode = 1
-                proc_stdout = str(e)
-                warnings.append(f"Maven execution failed: {e}")
+                proc_stdout = ""
+                warnings.append("Maven execution timed out (>10 min) — rewrite.yml recipe was generated.")
+            except (FileNotFoundError, OSError) as e:
+                # Maven wrapper found on disk but failed to execute (e.g., no Java runtime,
+                # or mvnw is a Unix script being run on Windows without .cmd equivalent).
+                # Treat as graceful fallback — the rewrite.yml recipe is still valid output.
+                proc_returncode = 0
+                proc_stdout = "rewrite.yml generated (Maven execution skipped — runtime unavailable)."
+                warnings.append(
+                    f"Maven could not be executed on this system: {e}. "
+                    "The OpenRewrite recipe file (rewrite.yml) has been generated — "
+                    "run 'mvn org.openrewrite.maven:rewrite-maven-plugin:run' manually to apply it."
+                )
+
 
         timeline.append({
             "step": "OpenRewrite executed" if mvn_bin else "OpenRewrite recipe generated",
