@@ -29,18 +29,13 @@ export default function App() {
         <div className="app-layout">
           <header className="top-bar">
             <div className="top-bar-logo">
-              <svg width="24" height="24" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 10 }}>
-                {/* Top Segment */}
-                <path d="M50 15 L85 35 L85 47 L50 27 Z" fill="#2d939a" />
-                <path d="M50 15 L15 35 L50 55 L85 35 Z" fill="#3ca6ae" />
-                <path d="M15 35 L50 55 L50 67 L15 47 Z" fill="#207f85" />
-                {/* Bottom Segment */}
-                <path d="M50 48 L85 68 L50 88 L15 68 Z" fill="#3ca6ae" />
-                <path d="M50 48 L85 68 L85 80 L50 60 Z" fill="#207f85" />
-                <path d="M15 68 L50 88 L50 76 L15 56 Z" fill="#1b6d72" />
-                {/* Center Circle */}
-                <circle cx="50" cy="51" r="9" fill="#f2bd22" />
-              </svg>
+              <img
+                src="/SystemaOps-logo.webp"
+                alt="SystemaOps Logo"
+                width="22"
+                height="22"
+                style={{ marginRight: 10 }}
+              />
               <span style={{ fontWeight: 700, letterSpacing: '0.06em', color: '#fff', fontSize: 13 }}>
                 SYSTEMAOPS MODERNIZE
               </span>
@@ -53,18 +48,13 @@ export default function App() {
           <div className="app-shell">
             <aside className="sidebar">
               <div className="sidebar-logo">
-                <svg width="20" height="20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 6 }}>
-                  {/* Top Segment */}
-                  <path d="M50 15 L85 35 L85 47 L50 27 Z" fill="#2d939a" />
-                  <path d="M50 15 L15 35 L50 55 L85 35 Z" fill="#3ca6ae" />
-                  <path d="M15 35 L50 55 L50 67 L15 47 Z" fill="#207f85" />
-                  {/* Bottom Segment */}
-                  <path d="M50 48 L85 68 L50 88 L15 68 Z" fill="#3ca6ae" />
-                  <path d="M50 48 L85 68 L85 80 L50 60 Z" fill="#207f85" />
-                  <path d="M15 68 L50 88 L50 76 L15 56 Z" fill="#1b6d72" />
-                  {/* Center Circle */}
-                  <circle cx="50" cy="51" r="9" fill="#f2bd22" />
-                </svg>
+                <img
+                  src="/SystemaOps-logo.webp"
+                  alt="SystemaOps Logo"
+                  width="20"
+                  height="20"
+                  style={{ marginRight: 6 }}
+                />
                 <span>Platform</span>
               </div>
               {NAV.map(n => (
