@@ -1090,17 +1090,18 @@ export default function Pipeline() {
   };
 
   return (
-    <div style={{ display: 'flex', gap: 0, minHeight: 'calc(100vh - 48px)', position: 'relative' }}>
+    <div style={{ display: 'flex', gap: 0, minHeight: 'calc(100vh - 48px)', position: 'relative', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
       {/* ── Sidebar ── */}
       <div style={{
         width: 260, flexShrink: 0,
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: '1px solid var(--color-border)',
         padding: '24px 0',
+        background: 'var(--color-surface)',
         position: 'sticky', top: 0, height: 'calc(100vh - 48px)', overflowY: 'auto',
       }}>
-        <div style={{ padding: '0 20px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 8 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Migration Pipeline</p>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ padding: '0 20px 16px', borderBottom: '1px solid var(--color-border)', marginBottom: 8 }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Migration Pipeline</p>
+          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {projectId?.slice(0, 12)}…
           </p>
         </div>
@@ -1111,23 +1112,23 @@ export default function Pipeline() {
             <div key={step.key} style={{
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 20px',
-              background: status === 'active' ? 'rgba(99,102,241,0.12)' : 'transparent',
-              borderLeft: `3px solid ${status === 'active' ? '#6366f1' : status === 'done' ? '#10b981' : 'transparent'}`,
+              background: status === 'active' ? 'rgba(29, 127, 138, 0.08)' : 'transparent',
+              borderLeft: `3px solid ${status === 'active' ? 'var(--color-accent)' : status === 'done' ? 'var(--color-success)' : 'transparent'}`,
               transition: 'all 0.2s',
             }}>
               <div style={{
                 width: 26, height: 26, borderRadius: 99, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 11, fontWeight: 700,
-                background: status === 'done' ? '#10b981' : status === 'active' ? '#6366f1' : 'rgba(255,255,255,0.08)',
-                color: status === 'upcoming' ? 'var(--text-muted)' : '#fff',
+                background: status === 'done' ? 'var(--color-success)' : status === 'active' ? 'var(--color-accent)' : 'rgba(0, 0, 0, 0.05)',
+                color: status === 'upcoming' ? 'var(--color-text-muted)' : '#fff',
               }}>
                 {status === 'done' ? '✓' : step.number}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
                   fontSize: 13, fontWeight: status === 'active' ? 600 : 400,
-                  color: status === 'active' ? '#fff' : status === 'done' ? '#10b981' : 'var(--text-muted)',
+                  color: status === 'active' ? 'var(--color-text)' : status === 'done' ? 'var(--color-success)' : 'var(--color-text-muted)',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>{step.title}</div>
               </div>
@@ -1143,22 +1144,22 @@ export default function Pipeline() {
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
             <div style={{
-              width: 36, height: 36, borderRadius: 10, background: 'rgba(99,102,241,0.2)',
+              width: 36, height: 36, borderRadius: 10, background: 'rgba(29, 127, 138, 0.15)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
             }}>{currentStep.icon}</div>
             <div>
-              <p style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <p style={{ fontSize: 12, color: 'var(--color-accent)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 Step {currentStep.number} of 12
               </p>
               <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{currentStep.title}</h1>
             </div>
           </div>
           {/* Progress bar */}
-          <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 99, overflow: 'hidden', marginTop: 16 }}>
+          <div style={{ height: 3, background: 'var(--color-border)', borderRadius: 99, overflow: 'hidden', marginTop: 16 }}>
             <div style={{
               height: '100%',
               width: `${(Math.min(currentStep.number, 12) / 12) * 100}%`,
-              background: 'linear-gradient(90deg, #6366f1, #06b6d4)',
+              background: 'var(--color-accent)',
               transition: 'width 0.4s ease',
             }} />
           </div>

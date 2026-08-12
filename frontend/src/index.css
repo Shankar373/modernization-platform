@@ -1,17 +1,17 @@
 :root {
-  --color-bg: #0b0f19;
-  --color-surface: #111c24;
-  --color-surface-2: #172430;
-  --color-border: #1d3040;
-  --color-accent: #248888;          /* SystemaOps Teal */
-  --color-accent-2: #32a1a1;
+  --color-bg: #f8f9fa;               /* SystemaOps Website Light Grey */
+  --color-surface: #ffffff;          /* Pure White Cards */
+  --color-surface-2: #f1f3f5;
+  --color-border: #e2e8f0;           /* Soft grey borders */
+  --color-accent: #1d7f8a;          /* SystemaOps Teal */
+  --color-accent-2: #06283d;        /* Deep Blue Navigation */
   --color-success: #10b981;
   --color-warning: #f2bd22;         /* SystemaOps Gold */
   --color-danger: #ef4444;
-  --color-text: #f1f5f9;
-  --color-text-muted: #8ca2b0;
-  --color-text-dim: #475d6b;
-  --color-systema-purple: #714B67;  /* Odoo Header Purple */
+  --color-text: #1e293b;            /* Dark Slate Text */
+  --color-text-muted: #64748b;
+  --color-text-dim: #94a3b8;
+  --color-systema-purple: #714B67;  /* Odoo purple header */
   --color-systema-gold: #f2bd22;
   --color-java: #f97316;
   --color-python: #3b82f6;
@@ -23,7 +23,7 @@
   --font-sans: 'Inter', -apple-system, sans-serif;
   --radius: 8px;
   --radius-lg: 12px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.5);
+  --shadow: 0 4px 20px rgba(0,0,0,0.06);
   --transition: 0.2s ease;
 }
 
