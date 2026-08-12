@@ -254,14 +254,49 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
         )
 
     def _get_mvn_cmd(self, workspace_path: str) -> Optional[str]:
-        """Find Maven binary: workspace wrapper (mvnw.cmd / mvnw) or system mvn."""
+        """Find Maven binary: workspace wrapper (mvnw.cmd / mvnw) or system mvn.
+
+        Windows note: mvnw.cmd must be invoked via subprocess with shell=True.
+        We return the wrapper path and set _mvn_shell=True accordingly.
+        """
         ws = Path(workspace_path)
-        wrapper = ws / ("mvnw.cmd" if os.name == "nt" else "mvnw")
-        if wrapper.exists():
-            return str(wrapper)
+        # On Windows always prefer mvnw.cmd
+        if os.name == "nt":
+            wrapper = ws / "mvnw.cmd"
+            if wrapper.exists():
+                self._mvn_shell = True
+                return str(wrapper)
+            # Also try mvnw (some repos only have this even on Windows)
+            wrapper = ws / "mvnw"
+            if wrapper.exists():
+                self._mvn_shell = True
+                return str(wrapper)
+        else:
+            wrapper = ws / "mvnw"
+            if wrapper.exists():
+                self._mvn_shell = False
+                return str(wrapper)
         if shutil.which("mvn"):
+            self._mvn_shell = False
             return "mvn"
         return None
+
+    def _mvn_run(self, cmd: list[str], cwd: str, timeout: int = 600) -> subprocess.CompletedProcess:
+        """Run a Maven command, handling Windows shell=True requirement for .cmd wrappers."""
+        use_shell = getattr(self, "_mvn_shell", False)
+        if use_shell and os.name == "nt":
+            # On Windows, join as a single string for shell=True invocation
+            cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
+            return subprocess.run(
+                cmd_str,
+                capture_output=True, text=True,
+                timeout=timeout, cwd=cwd, shell=True,
+            )
+        return subprocess.run(
+            cmd,
+            capture_output=True, text=True,
+            timeout=timeout, cwd=cwd,
+        )
 
     def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
         generator = RewriteYmlGenerator()
@@ -286,7 +321,7 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
             )
 
         try:
-            result = subprocess.run(
+            result = self._mvn_run(
                 [
                     mvn_bin,
                     "-f", str(pom_path),
@@ -296,17 +331,15 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
                     "--no-transfer-progress",
                     "-q",
                 ],
-                capture_output=True,
-                text=True,
-                timeout=300,
                 cwd=workspace_path,
+                timeout=300,
             )
             success = result.returncode == 0
             return DryRunResult(
                 success=success,
                 notes=result.stdout[-2000:] if result.stdout else result.stderr[-2000:],
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             return DryRunResult(success=False, notes=f"Dry run failed: {e}")
 
     # ── Migration ─────────────────────────────────────────────────────────────
@@ -344,7 +377,7 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
             proc_stdout = "rewrite.yml generated successfully."
         else:
             try:
-                proc = subprocess.run(
+                proc = self._mvn_run(
                     [
                         mvn_bin,
                         "-f", str(pom_path),
@@ -352,17 +385,15 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
                         f"-Drewrite.configFile={rewrite_yml_path}",
                         "--no-transfer-progress",
                     ],
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
                     cwd=workspace_path,
+                    timeout=600,
                 )
                 proc_returncode = proc.returncode
                 proc_stdout = proc.stdout
-            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
                 proc_returncode = 1
                 proc_stdout = str(e)
-                warnings.append(str(e))
+                warnings.append(f"Maven execution failed: {e}")
 
         timeline.append({
             "step": "OpenRewrite executed" if mvn_bin else "OpenRewrite recipe generated",
@@ -413,12 +444,10 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
             )
 
         try:
-            proc = subprocess.run(
+            proc = self._mvn_run(
                 [mvn_bin, "test", "--no-transfer-progress", "-q"],
-                capture_output=True,
-                text=True,
-                timeout=600,
                 cwd=workspace_path,
+                timeout=600,
             )
             passed = proc.returncode == 0
             return ValidationResult(
@@ -427,7 +456,7 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
                 raw_output=proc.stdout[-5000:],
                 errors=[] if passed else [proc.stderr[-2000:]],
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             return ValidationResult(build_passed=True, warnings=[str(e)])
 
 

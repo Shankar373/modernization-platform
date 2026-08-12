@@ -428,10 +428,15 @@ class PythonRuffAdapter(MigrationAdapter):
         return snapshot
 
     def _find_ruff(self, workspace_path: str) -> str:
-        """Prefer running virtualenv's ruff, then workspace .venv, then system ruff."""
+        """Prefer running backend virtualenv's ruff, then workspace .venv, then PATH.
+
+        On Windows, subprocess.run raises [WinError 2] if the executable is not found.
+        We resolve the full path before calling subprocess so it fails clearly.
+        """
         import sys
-        
-        # 1. Check running backend virtual environment (where ruff is installed)
+        import shutil as _shutil
+
+        # 1. Check running backend virtual environment (where ruff is installed via requirements.txt)
         py_bin_dir = Path(sys.executable).parent
         for candidate in [
             py_bin_dir / "ruff.exe",
@@ -450,7 +455,16 @@ class PythonRuffAdapter(MigrationAdapter):
         ]:
             if candidate.exists():
                 return str(candidate)
-        return "ruff"  # system ruff
+
+        # 3. System PATH lookup — shutil.which returns full path or None
+        sys_ruff = _shutil.which("ruff")
+        if sys_ruff:
+            return sys_ruff
+
+        # 4. Not found anywhere — raise clearly so warning is meaningful
+        raise FileNotFoundError(
+            "ruff not found. Install with: pip install ruff"
+        )
 
 
     def _compute_diffs(self, before: dict, after: dict) -> List[FileChangeMetadata]:
