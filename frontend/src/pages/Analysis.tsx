@@ -178,7 +178,7 @@ export default function Analysis() {
   return (
     <div>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1>Application Analysis</h1>
           <p className="text-muted" style={{ marginTop: 8 }}>
@@ -186,10 +186,20 @@ export default function Analysis() {
             &nbsp;·&nbsp;{techProfile?.languages?.length || 0} languages detected
           </p>
         </div>
-        <span className={`badge ${supported_languages.length > 0 ? 'badge-available' : 'badge-unavailable'}`}>
-          {supported_languages.length > 0 ? `${supported_languages.length} supported` : 'Assessment only'}
-        </span>
+        <div className="flex gap-3 items-center">
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => navigate(`/dependencies?wp=${encodeURIComponent(workspacePath)}&project=${projectId || ''}`)}
+          >
+            🔍 Analyze Dependencies
+          </button>
+          <span className={`badge ${supported_languages.length > 0 ? 'badge-available' : 'badge-unavailable'}`}>
+            {supported_languages.length > 0 ? `${supported_languages.length} supported` : 'Assessment only'}
+          </span>
+        </div>
       </div>
+
 
       {/* ── ⚡ AUTOMATED PIPELINE CARD ──────────────────────────────────────── */}
       {supported_languages.length > 0 && (
