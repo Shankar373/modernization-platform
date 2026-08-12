@@ -9,7 +9,7 @@ from typing import List
 
 from bs4 import BeautifulSoup
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import is_ignored_path, AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
 from app.core.domain.models import (
     CapabilityStatus,
     FileChangeMetadata,
@@ -47,10 +47,10 @@ class HtmlModernizationAdapter(MigrationAdapter):
         ws = Path(workspace_path)
         return any(
             f for f in ws.rglob("*.html")
-            if not any(skip in f.parts for skip in _SKIP_DIRS)
+            if not is_ignored_path(f)
         ) or any(
             f for f in ws.rglob("*.htm")
-            if not any(skip in f.parts for skip in _SKIP_DIRS)
+            if not is_ignored_path(f)
         )
 
     def analyze(self, profile: TechnologyProfile) -> AnalysisResult:
@@ -290,7 +290,7 @@ class HtmlModernizationAdapter(MigrationAdapter):
     def _iter_html_files(self, ws: Path):
         for f in ws.rglob("*"):
             if f.is_file() and f.suffix.lower() in (".html", ".htm"):
-                if not any(skip in f.parts for skip in _SKIP_DIRS):
+                if not is_ignored_path(f):
                     yield f
 
     def _snapshot_html_files(self, ws: Path) -> dict:

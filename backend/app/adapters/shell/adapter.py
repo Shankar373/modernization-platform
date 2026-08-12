@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import is_ignored_path, AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
 from app.core.domain.models import (
     CapabilityStatus, FileChangeMetadata, MigrationCapability,
     MigrationPlan, MigrationProfile, MigrationResult, MigrationStatistics,
@@ -134,7 +134,7 @@ class ShellAdapter(MigrationAdapter):
 
     def _iter(self, ws: Path):
         for f in ws.rglob("*"):
-            if (f.suffix in _SHELL_EXTS or f.name in {"Dockerfile", "Jenkinsfile"}) and not any(s in f.parts for s in _SKIP_DIRS):
+            if (f.suffix in _SHELL_EXTS or f.name in {"Dockerfile", "Jenkinsfile"}) and not is_ignored_path(f):
                 try:
                     if f.stat().st_size <= _MAX_FILE_BYTES:
                         yield f

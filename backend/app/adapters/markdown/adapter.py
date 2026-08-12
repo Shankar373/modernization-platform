@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult, is_ignored_path
 from app.core.domain.models import (
     CapabilityStatus, FileChangeMetadata, MigrationCapability,
     MigrationPlan, MigrationProfile, MigrationResult, MigrationStatistics,
@@ -39,7 +39,7 @@ class MarkdownFormatterAdapter(MigrationAdapter):
         ws = Path(workspace_path)
         return any(
             f for f in list(ws.rglob("*.md")) + list(ws.rglob("*.markdown"))
-            if not any(s in f.parts for s in _SKIP_DIRS)
+            if not is_ignored_path(f)
         )
 
     def analyze(self, profile: TechnologyProfile) -> AnalysisResult:
@@ -113,7 +113,7 @@ class MarkdownFormatterAdapter(MigrationAdapter):
     def _iter(self, ws: Path):
         for ext in ("*.md", "*.markdown"):
             for f in ws.rglob(ext):
-                if not any(s in f.parts for s in _SKIP_DIRS):
+                if not is_ignored_path(f):
                     yield f
 
     def _snapshot(self, ws: Path) -> dict:

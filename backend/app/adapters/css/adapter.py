@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import is_ignored_path, AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
 from app.core.domain.models import (
     CapabilityStatus,
     FileChangeMetadata,
@@ -61,7 +61,7 @@ class CssModernizationAdapter(MigrationAdapter):
         ws = Path(workspace_path)
         return any(
             f for f in ws.rglob("*.css")
-            if not any(skip in f.parts for skip in _SKIP_DIRS)
+            if not is_ignored_path(f)
         )
 
     def analyze(self, profile: TechnologyProfile) -> AnalysisResult:
@@ -283,7 +283,7 @@ class CssModernizationAdapter(MigrationAdapter):
     def _iter_css_files(self, ws: Path):
         for f in ws.rglob("*"):
             if f.is_file() and f.suffix.lower() in (".css", ".scss"):
-                if not any(skip in f.parts for skip in _SKIP_DIRS):
+                if not is_ignored_path(f):
                     yield f
 
     def _snapshot_css_files(self, ws: Path) -> dict:

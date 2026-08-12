@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import is_ignored_path, AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
 from app.core.domain.models import (
     CapabilityStatus, FileChangeMetadata, MigrationCapability,
     MigrationPlan, MigrationProfile, MigrationResult, MigrationStatistics,
@@ -194,7 +194,7 @@ class JavaScriptPrettierAdapter(MigrationAdapter):
         for f in ws.rglob("*"):
             if f.suffix not in _JS_EXTS:
                 continue
-            if any(s in f.parts for s in _SKIP_DIRS):
+            if is_ignored_path(f):
                 continue
             try:
                 if f.stat().st_size > _MAX_FILE_BYTES:

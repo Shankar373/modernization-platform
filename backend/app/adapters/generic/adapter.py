@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import is_ignored_path, AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
 from app.core.domain.models import (
     CapabilityStatus, FileChangeMetadata, MigrationCapability,
     MigrationPlan, MigrationProfile, MigrationResult, MigrationStatistics,
@@ -129,7 +129,7 @@ class GenericFallbackAdapter(MigrationAdapter):
         for f in ws.rglob("*"):
             if not f.is_file():
                 continue
-            if any(s in f.parts for s in _SKIP_DIRS):
+            if is_ignored_path(f):
                 continue
             suf = f.suffix.lower()
             name = f.name.lower()

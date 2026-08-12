@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult
+from app.adapters.base import AnalysisResult, DryRunResult, MigrationAdapter, ValidationResult, is_ignored_path
 from app.core.domain.models import (
     CapabilityStatus, FileChangeMetadata, MigrationCapability,
     MigrationPlan, MigrationProfile, MigrationResult, MigrationStatistics,
@@ -15,6 +15,9 @@ from app.core.domain.models import (
 )
 
 _SKIP_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git", "dist", "build"}
+
+# Never reformat package manager lockfiles — they have strict formats
+_SKIP_FILENAMES = {"pnpm-lock.yaml", "yarn.lock", "package-lock.yaml"}
 
 
 def _get_yaml():
@@ -44,8 +47,9 @@ class YamlFormatterAdapter(MigrationAdapter):
         ws = Path(workspace_path)
         return any(
             f for f in list(ws.rglob("*.yaml")) + list(ws.rglob("*.yml"))
-            if not any(s in f.parts for s in _SKIP_DIRS)
+            if not is_ignored_path(f) and f.name not in _SKIP_FILENAMES
         )
+
 
     def analyze(self, profile: TechnologyProfile) -> AnalysisResult:
         return AnalysisResult(applicable=self.detect(str(profile)), notes="YAML formatting available")
@@ -132,7 +136,7 @@ class YamlFormatterAdapter(MigrationAdapter):
     def _iter(self, ws: Path):
         for ext in ("*.yaml", "*.yml"):
             for f in ws.rglob(ext):
-                if not any(s in f.parts for s in _SKIP_DIRS):
+                if not is_ignored_path(f) and f.name not in _SKIP_FILENAMES:
                     yield f
 
     def _snapshot(self, ws: Path) -> dict:

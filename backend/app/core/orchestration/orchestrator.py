@@ -16,6 +16,7 @@ from typing import Optional
 from app.adapters.base import MigrationAdapter
 from app.adapters.java.adapter import JavaOpenRewriteAdapter
 from app.adapters.python.adapter import PythonRuffAdapter
+from app.adapters.typescript.adapter import TypeScriptAdapter
 from app.adapters.html.adapter import HtmlModernizationAdapter
 from app.adapters.css.adapter import CssModernizationAdapter
 from app.adapters.json.adapter import JsonFormatterAdapter
@@ -46,12 +47,13 @@ from app.discovery.scanner import UniversalScanner
 _ADAPTERS: list[MigrationAdapter] = [
     JavaOpenRewriteAdapter(),
     PythonRuffAdapter(),
+    TypeScriptAdapter(),     # TypeScript-specific: var→let, require→import, ts-ignore fixes
+    JavaScriptPrettierAdapter(),  # JS/TS formatting via Prettier
     HtmlModernizationAdapter(),
     CssModernizationAdapter(),
     JsonFormatterAdapter(),
     YamlFormatterAdapter(),
     MarkdownFormatterAdapter(),
-    JavaScriptPrettierAdapter(),
     GoAdapter(),
     PhpAdapter(),
     ShellAdapter(),
@@ -68,7 +70,7 @@ _EXT_TO_LANG: dict[str, set[str]] = {
     ".html":      {"html"}, ".htm": {"html"},
     ".css":       {"css"},  ".scss": {"css"}, ".sass": {"css"},
     ".js":        {"javascript"}, ".jsx": {"javascript"},
-    ".ts":        {"javascript"}, ".tsx": {"javascript"},
+    ".ts":        {"typescript", "javascript"}, ".tsx": {"typescript", "javascript"},
     ".mjs":       {"javascript"}, ".cjs": {"javascript"},
     ".json":      {"json"},
     ".yaml":      {"yaml"}, ".yml": {"yaml"},

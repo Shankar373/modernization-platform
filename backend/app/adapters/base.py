@@ -1,8 +1,15 @@
-"""MigrationAdapter — Abstract Base Class for all language adapters."""
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import List
+
+def is_ignored_path(path: Path) -> bool:
+    """Check if a path contains any standard ignored directory names or virtualenvs."""
+    ignore_dirs = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", "target", "build", "dist", "site-packages", "vendor", ".pytest_cache", ".next", ".ruff_cache", ".mypy_cache"}
+    for p in path.parts:
+        pl = p.lower()
+        if pl in ignore_dirs or pl.startswith(".venv") or "venv" in pl or "site-packages" in pl:
+            return True
+    return False
 
 from app.core.domain.models import (
     MigrationCapability,

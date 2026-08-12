@@ -26,6 +26,7 @@ from app.adapters.base import (
     DryRunResult,
     MigrationAdapter,
     ValidationResult,
+    is_ignored_path,
 )
 from app.core.domain.models import (
     CapabilityStatus,
@@ -341,7 +342,7 @@ class PythonRuffAdapter(MigrationAdapter):
         ws_path = Path(workspace_path)
         syntax_ok = True
         for py_file in ws_path.rglob("*.py"):
-            if any(skip in py_file.parts for skip in {".venv", "venv", "__pycache__", "node_modules"}):
+            if is_ignored_path(py_file):
                 continue
             try:
                 import ast
@@ -418,7 +419,7 @@ class PythonRuffAdapter(MigrationAdapter):
     def _snapshot_py_files(self, ws: Path) -> dict:
         snapshot = {}
         for f in ws.rglob("*.py"):
-            if ".venv" in str(f) or "node_modules" in str(f):
+            if is_ignored_path(f):
                 continue
             try:
                 snapshot[str(f.relative_to(ws))] = f.read_text(encoding="utf-8", errors="replace")

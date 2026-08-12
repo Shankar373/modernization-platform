@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getResult, getReport, downloadModernizedZip } from '../api/client';
+import type { MigrationResult, MigrationReport, FileChangeMetadata, MigrationStatistics } from '../types';
 
 const STATUS_BANNER: Record<string, { cls: string; icon: string }> = {
   SUCCESS:              { cls: 'success',    icon: '✅' },
@@ -35,20 +36,72 @@ function MiniDiff({ diff }: { diff: string }) {
   );
 }
 
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+    </div>
+  );
+}
+
+function FileRow({
+  f,
+  expanded,
+  onToggle,
+}: {
+  f: FileChangeMetadata;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div style={{ borderBottom: '1px solid var(--color-border)' }}>
+      <div
+        className="flex items-center gap-3"
+        style={{ padding: '10px 0', cursor: 'pointer' }}
+        onClick={onToggle}
+      >
+        <span style={{ color: 'var(--color-text-muted)', fontSize: 16, width: 20, textAlign: 'center' }}>
+          {expanded ? '▼' : '▶'}
+        </span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {f.file}
+        </span>
+        <div className="flex gap-2">
+          <span
+            className={`badge ${f.status === 'MODIFIED' ? 'badge-warning' : f.status === 'ADDED' ? 'badge-success' : 'badge-danger'}`}
+            style={{ fontSize: 10 }}
+          >
+            {f.status}
+          </span>
+          {f.tools?.map((t) => (
+            <span key={t} className="badge badge-assessment" style={{ fontSize: 10 }}>{t}</span>
+          ))}
+        </div>
+      </div>
+      {expanded && <MiniDiff diff={f.diff} />}
+    </div>
+  );
+}
+
 export default function Results() {
-  const { resultId } = useParams();
+  const { resultId } = useParams<{ resultId: string }>();
   const navigate = useNavigate();
-  const [result, setResult]   = useState<any>(null);
-  const [report, setReport]   = useState<any>(null);
+  const [result, setResult]   = useState<MigrationResult | null>(null);
+  const [report, setReport]   = useState<MigrationReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getResult(resultId!), getReport(resultId!)])
-      .then(([rRes, rpRes]) => { setResult(rRes.data); setReport(rpRes.data); })
+    if (!resultId) return;
+    Promise.all([getResult(resultId), getReport(resultId)])
+      .then(([rRes, rpRes]) => {
+        setResult(rRes.data as MigrationResult);
+        setReport(rpRes.data as MigrationReport);
+      })
       .catch(() => {
         const cached = sessionStorage.getItem(`result_${resultId}`);
-        if (cached) setResult(JSON.parse(cached));
+        if (cached) setResult(JSON.parse(cached) as MigrationResult);
       })
       .finally(() => setLoading(false));
   }, [resultId]);
@@ -61,10 +114,21 @@ export default function Results() {
   );
   if (!result) return <div style={{ padding: 24, color: 'var(--color-danger)' }}>Result not found.</div>;
 
-  const s       = result.status;
-  const banner  = STATUS_BANNER[s] || { cls: 'assessment', icon: 'ℹ️' };
-  const stats   = result.statistics || {};
-  const changed = result.changed_files || [];
+  const s: string   = result.status;
+  const banner      = STATUS_BANNER[s] || { cls: 'assessment', icon: 'ℹ️' };
+  const stats: MigrationStatistics = result.statistics || {} as MigrationStatistics;
+  const changed: FileChangeMetadata[] = result.changed_files || [];
+
+  const statCards = [
+    { label: 'Files Scanned',    value: stats.files_scanned   ?? 0 },
+    { label: 'Files Modified',   value: stats.files_modified  ?? 0 },
+    { label: 'Files Unchanged',  value: stats.files_unchanged ?? 0 },
+    { label: 'Deps Updated',     value: stats.dependencies_updated ?? 0 },
+    { label: 'Capabilities Run', value: stats.capabilities_run ?? 0 },
+    { label: 'Tests Passed',     value: stats.tests_passed ?? '—' },
+    { label: 'Warnings',         value: result.warnings?.length ?? 0 },
+    { label: 'Manual Items',     value: result.manual_remediation?.length ?? 0 },
+  ];
 
   return (
     <div>
@@ -84,20 +148,8 @@ export default function Results() {
 
       {/* Stats grid */}
       <div className="stat-grid" style={{ marginBottom: 24 }}>
-        {[
-          { label: 'Files Scanned',    value: stats.files_scanned   ?? 0 },
-          { label: 'Files Modified',   value: stats.files_modified  ?? 0 },
-          { label: 'Files Unchanged',  value: stats.files_unchanged ?? 0 },
-          { label: 'Deps Updated',     value: stats.dependencies_updated ?? 0 },
-          { label: 'Capabilities Run', value: stats.capabilities_run ?? 0 },
-          { label: 'Tests Passed',     value: stats.tests_passed ?? '—' },
-          { label: 'Warnings',         value: result.warnings?.length ?? 0 },
-          { label: 'Manual Items',     value: result.manual_remediation?.length ?? 0 },
-        ].map(s => (
-          <div className="stat-card" key={s.label}>
-            <div className="stat-value">{s.value}</div>
-            <div className="stat-label">{s.label}</div>
-          </div>
+        {statCards.map((sc) => (
+          <StatCard key={sc.label} label={sc.label} value={sc.value as string | number} />
         ))}
       </div>
 
@@ -120,16 +172,16 @@ export default function Results() {
       </div>
 
       {/* Warnings */}
-      {result.warnings?.length > 0 && (
+      {(result.warnings?.length ?? 0) > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <h3 style={{ marginBottom: 12, color: 'var(--color-warning)' }}>⚠️ Warnings</h3>
-          {result.warnings.map((w: string, i: number) => (
+          {result.warnings!.map((w, i) => (
             <p key={i} className="text-sm" style={{ marginBottom: 6 }}>• {w}</p>
           ))}
         </div>
       )}
 
-      {/* ── Inline Changed Files with Mini Diff ─────────────────────── */}
+      {/* Changed Files with Mini Diff */}
       {changed.length > 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
           <div className="card-header">
@@ -142,46 +194,24 @@ export default function Results() {
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {changed.map((f: any) => {
-              const isExpanded = expandedFile === f.file;
-              return (
-                <div key={f.file} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  {/* File row */}
-                  <div
-                    className="flex items-center gap-3"
-                    style={{ padding: '10px 0', cursor: 'pointer' }}
-                    onClick={() => setExpandedFile(isExpanded ? null : f.file)}
-                  >
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: 16, width: 20, textAlign: 'center' }}>
-                      {isExpanded ? '▼' : '▶'}
-                    </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {f.file}
-                    </span>
-                    <div className="flex gap-2">
-                      <span className={`badge ${f.status === 'MODIFIED' ? 'badge-warning' : f.status === 'ADDED' ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: 10 }}>
-                        {f.status}
-                      </span>
-                      {f.tools?.map((t: string) => (
-                        <span key={t} className="badge badge-assessment" style={{ fontSize: 10 }}>{t}</span>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Mini diff — only when expanded */}
-                  {isExpanded && <MiniDiff diff={f.diff} />}
-                </div>
-              );
-            })}
+            {changed.map((f) => (
+              <FileRow
+                key={f.file}
+                f={f}
+                expanded={expandedFile === f.file}
+                onToggle={() => setExpandedFile(expandedFile === f.file ? null : f.file)}
+              />
+            ))}
           </div>
         </div>
       )}
 
       {/* Timeline */}
-      {result.timeline?.length > 0 && (
+      {(result.timeline?.length ?? 0) > 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
           <h3 style={{ marginBottom: 16 }}>Execution Timeline</h3>
           <div className="timeline">
-            {result.timeline.map((t: any, i: number) => (
+            {result.timeline!.map((t, i) => (
               <div className="timeline-item" key={i}>
                 <div className={`timeline-dot ${t.status === 'completed' ? 'done' : t.status === 'failed' ? 'failed' : 'running'}`}>
                   {t.status === 'completed' ? '✓' : t.status === 'failed' ? '✗' : i + 1}
@@ -214,7 +244,6 @@ export default function Results() {
         <button className="btn btn-ghost" onClick={() => navigate('/')}>← Dashboard</button>
         <button className="btn btn-ghost" onClick={() => navigate('/history')}>⟳ History</button>
       </div>
-
     </div>
   );
 }
