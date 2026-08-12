@@ -1,5 +1,7 @@
 """Migration API — plan, dry run, approve, execute, report."""
+import asyncio
 import io
+import traceback
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -98,14 +100,16 @@ async def execute_migration(request: ExecuteRequest):
         raise HTTPException(status_code=404, detail="Plan not found.")
 
     try:
-        result = _orchestrator.migrate(
-            workspace_path=plan_data["workspace_path"],
-            plan=plan_data["plan"],
+        # Run blocking migration in a thread so the event loop stays free (fixes WinError 64)
+        result = await asyncio.to_thread(
+            _orchestrator.migrate,
+            plan_data["workspace_path"],
+            plan_data["plan"],
         )
         _results[result.result_id] = {"result": result, "plan_data": plan_data}
         return result.model_dump()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Migration failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Migration failed: {e}\n{traceback.format_exc()[:800]}")
 
 
 @router.post("/migration/migrate-all")
@@ -113,15 +117,20 @@ async def migrate_all(request: MigrateAllRequest):
     """
     Full-application migration — auto-detects ALL languages and runs every
     applicable adapter (Python/ruff, HTML, CSS, JS/prettier, JSON, YAML, Markdown).
-    Returns a single combined result.
+    Runs in a background thread via asyncio.to_thread() so the event loop
+    stays unblocked (prevents WinError 64 / connection reset on Windows).
     """
     try:
-        result = _orchestrator.migrate_all(
-            workspace_path=request.workspace_path,
-            project_id=request.project_id,
-            migration_profile=request.migration_profile,
+        # ── Key fix: run the blocking sync function OFF the event loop thread ──
+        # migrate_all() internally uses ThreadPoolExecutor; calling it directly
+        # from an async handler blocks the ProactorEventLoop on Windows and
+        # causes WinError 64 / connection resets.
+        result = await asyncio.to_thread(
+            _orchestrator.migrate_all,
+            request.workspace_path,
+            request.project_id,
+            request.migration_profile,
         )
-        # Store with a synthetic plan_data so download/report still work
         _results[result.result_id] = {
             "result": result,
             "plan_data": {
@@ -131,7 +140,8 @@ async def migrate_all(request: MigrateAllRequest):
         }
         return result.model_dump()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Full-app migration failed: {e}")
+        detail = f"Full-app migration failed: {e}\n{traceback.format_exc()[:1200]}"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @router.get("/migration/result/{result_id}")

@@ -123,7 +123,7 @@ class MigrationCapability(BaseModel):
     target_versions: List[str] = []
     risk: RiskLevel = RiskLevel.MEDIUM
     description: str = ""
-    notes: str = ""
+    notes: Optional[str] = None
 
 
 # ── Migration Plan ────────────────────────────────────────────────────────────

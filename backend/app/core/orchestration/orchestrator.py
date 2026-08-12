@@ -6,9 +6,12 @@ It does NOT contain language-specific if/elif routing.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
+
 
 from app.adapters.base import MigrationAdapter
 from app.adapters.java.adapter import JavaOpenRewriteAdapter
@@ -48,6 +51,38 @@ _ADAPTERS: list[MigrationAdapter] = [
 
 
 
+
+_SKIP_SCAN_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git",
+                   "dist", "build", ".next", ".pytest_cache", ".mypy_cache"}
+
+# ── Extension → adapter language map (used in fast pre-scan) ─────────────────
+_EXT_TO_LANG: dict[str, set[str]] = {
+    ".py":    {"python"},
+    ".html":  {"html"}, ".htm": {"html"},
+    ".css":   {"css"},  ".scss": {"css"}, ".sass": {"css"},
+    ".js":    {"javascript"}, ".jsx": {"javascript"},
+    ".ts":    {"javascript"}, ".tsx": {"javascript"},
+    ".mjs":   {"javascript"}, ".cjs": {"javascript"},
+    ".json":  {"json"},
+    ".yaml":  {"yaml"}, ".yml": {"yaml"},
+    ".md":    {"markdown"}, ".markdown": {"markdown"},
+    ".java":  {"java"},
+}
+
+
+def _collect_extensions(workspace_path: str) -> frozenset[str]:
+    """
+    Single O(n) filesystem walk → frozenset of file extensions present.
+    Used by get_applicable_adapters() to avoid one rglob per adapter.
+    """
+    exts: set[str] = set()
+    ws = Path(workspace_path)
+    for f in ws.rglob("*"):
+        if f.is_file() and not any(s in f.parts for s in _SKIP_SCAN_DIRS):
+            exts.add(f.suffix.lower())
+    return frozenset(exts)
+
+
 class MigrationOrchestrator:
     """
     Coordinates the end-to-end migration pipeline.
@@ -60,14 +95,43 @@ class MigrationOrchestrator:
 
     def __init__(self):
         self.scanner = UniversalScanner()
+        # In-process cache: workspace_path → (frozenset[extensions], list[adapter])
+        self._adapter_cache: dict[str, tuple[frozenset, list]] = {}
+        # In-process analysis cache: workspace_path → assessment dict
+        self._analysis_cache: dict[str, dict] = {}
 
     def scan(self, workspace_path: str) -> TechnologyProfile:
         """Step 1: Scan the repository and build a technology profile."""
         return self.scanner.scan(workspace_path)
 
     def get_applicable_adapters(self, workspace_path: str) -> list[MigrationAdapter]:
-        """Return all adapters that claim applicability to this workspace."""
-        return [a for a in _ADAPTERS if a.detect(workspace_path)]
+        """
+        Return all adapters that apply to this workspace.
+
+        Optimisation: one filesystem walk builds the extension set; each
+        adapter's detect() is ONLY called when its known extensions are present,
+        and the result is cached for the lifetime of this request.
+        """
+        if workspace_path in self._adapter_cache:
+            _, adapters = self._adapter_cache[workspace_path]
+            return adapters
+
+        exts = _collect_extensions(workspace_path)
+
+        # Pre-filter: only call detect() if the extension map suggests this language exists
+        candidates: list[MigrationAdapter] = []
+        for adapter in _ADAPTERS:
+            # Find which extensions map to this adapter's language
+            adapter_exts = {e for e, langs in _EXT_TO_LANG.items() if adapter.language in langs}
+            if adapter_exts and not (exts & adapter_exts):
+                continue  # fast skip — no relevant files present
+            # Full detect() only for adapters that might apply
+            if adapter.detect(workspace_path):
+                candidates.append(adapter)
+
+        self._adapter_cache[workspace_path] = (exts, candidates)
+        return candidates
+
 
     def get_assessment(self, workspace_path: str, profile: TechnologyProfile) -> dict:
         """
@@ -175,12 +239,16 @@ class MigrationOrchestrator:
     ) -> MigrationResult:
         """
         Full-application migration: auto-detect ALL languages and run every
-        applicable adapter. Returns one combined MigrationResult.
+        applicable adapter IN PARALLEL. Returns one combined MigrationResult.
         """
+        import concurrent.futures
+        import threading
+
         combined_id = str(uuid.uuid4())
         timeline: list[dict] = [
             {"step": "Full-app migration started", "status": "running", "ts": datetime.utcnow().isoformat()}
         ]
+        timeline_lock = threading.Lock()
 
         adapters = self.get_applicable_adapters(workspace_path)
         if not adapters:
@@ -192,46 +260,68 @@ class MigrationOrchestrator:
 
         profile = self.scanner.scan(workspace_path)
 
-        total_scanned = total_modified = total_unchanged = total_caps = 0
-        all_changed_files = []
-        all_warnings: list[str] = []
-        all_build_passed = True
-        per_language: list[dict] = []
-
-        for adapter in adapters:
+        def _run_adapter(adapter: "MigrationAdapter"):
             lang = adapter.language
-            timeline.append({"step": f"[{lang}] Starting", "status": "running", "ts": datetime.utcnow().isoformat()})
+            with timeline_lock:
+                timeline.append({"step": f"[{lang}] Starting", "status": "running",
+                                  "ts": datetime.utcnow().isoformat()})
             try:
                 plan = adapter.create_plan(workspace_path, profile, "latest", migration_profile)
                 result = adapter.migrate(workspace_path, plan)
                 validation = adapter.validate(workspace_path, result)
 
-                # Tag each changed file with the adapter that modified it
+                # Tag files with adapter language
                 for cf in result.changed_files:
                     cf.tools = cf.tools or []
                     if lang not in cf.tools:
                         cf.tools.insert(0, lang)
-                    all_changed_files.append(cf)
 
-                total_scanned   += result.statistics.files_scanned
-                total_modified  += result.statistics.files_modified
-                total_unchanged += result.statistics.files_unchanged
-                total_caps      += result.statistics.capabilities_run
-                all_warnings    += result.warnings
-                if not validation.build_passed:
-                    all_build_passed = False
-
-                per_language.append({
-                    "language": lang, "adapter": adapter.provider,
-                    "files_modified": result.statistics.files_modified,
-                    "status": result.status.value,
-                })
-                timeline.append({"step": f"[{lang}] Done — {result.statistics.files_modified} file(s) modified",
-                                  "status": "completed", "ts": datetime.utcnow().isoformat()})
+                with timeline_lock:
+                    timeline.append({
+                        "step": f"[{lang}] Done — {result.statistics.files_modified} file(s) modified",
+                        "status": "completed", "ts": datetime.utcnow().isoformat(),
+                    })
+                return {"lang": lang, "adapter": adapter.provider, "result": result,
+                        "validation": validation, "error": None}
             except Exception as exc:
-                timeline.append({"step": f"[{lang}] Error: {exc}", "status": "error",
-                                  "ts": datetime.utcnow().isoformat()})
-                all_warnings.append(f"{lang} adapter failed: {exc}")
+                with timeline_lock:
+                    timeline.append({"step": f"[{lang}] Error: {exc}", "status": "error",
+                                     "ts": datetime.utcnow().isoformat()})
+                return {"lang": lang, "adapter": adapter.provider, "result": None,
+                        "validation": None, "error": str(exc)}
+
+        # Run adapters in parallel — max 8 workers, I/O-bound safe
+        max_workers = min(len(adapters), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_run_adapter, a): a for a in adapters}
+            adapter_results = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+        # Merge results
+        total_scanned = total_modified = total_unchanged = total_caps = 0
+        all_changed_files: list = []
+        all_warnings: list[str] = []
+        all_build_passed = True
+        per_language: list[dict] = []
+
+        for ar in adapter_results:
+            if ar["error"]:
+                all_warnings.append(f"{ar['lang']} adapter failed: {ar['error']}")
+                continue
+            result = ar["result"]
+            validation = ar["validation"]
+            all_changed_files.extend(result.changed_files)
+            total_scanned   += result.statistics.files_scanned
+            total_modified  += result.statistics.files_modified
+            total_unchanged += result.statistics.files_unchanged
+            total_caps      += result.statistics.capabilities_run
+            all_warnings    += result.warnings
+            if not validation.build_passed:
+                all_build_passed = False
+            per_language.append({
+                "language": ar["lang"], "adapter": ar["adapter"],
+                "files_modified": result.statistics.files_modified,
+                "status": result.status.value,
+            })
 
         timeline.append({"step": "Full-app migration completed", "status": "completed",
                          "ts": datetime.utcnow().isoformat()})
@@ -253,15 +343,29 @@ class MigrationOrchestrator:
             ),
             changed_files=all_changed_files,
             warnings=all_warnings,
-            timeline=timeline,
             completed_at=datetime.utcnow(),
-            logs={"per_language": per_language},
+            logs={"per_language": json.dumps(per_language)},
         )
 
 
 
-    def generate_report(self, workspace_path: str, plan: MigrationPlan, result: MigrationResult) -> dict:
+
+    def generate_report(self, workspace_path: str, plan: Optional[MigrationPlan], result: MigrationResult) -> dict:
         """Step 6: Generate the migration report."""
+        if not plan:
+            # Combined / Multi-language report
+            return {
+                "report_id": f"combined-rep-{uuid.uuid4().hex[:8]}",
+                "generated_at": datetime.utcnow().isoformat(),
+                "adapter": "orchestrator/combined",
+                "final_status": result.status.value,
+                "statistics": result.statistics.model_dump(),
+                "changed_files_count": len(result.changed_files),
+                "build_passed": result.statistics.build_passed,
+                "timeline": result.timeline,
+                "changed_files": [f.model_dump() for f in result.changed_files],
+            }
+
         adapter = self._find_adapter_for_plan(plan)
         if not adapter:
             language = plan.targets[0].language if plan.targets else "unknown"
@@ -284,8 +388,10 @@ class MigrationOrchestrator:
                 return adapter
         return None
 
-    def _find_adapter_for_plan(self, plan: MigrationPlan) -> Optional[MigrationAdapter]:
+    def _find_adapter_for_plan(self, plan: Optional[MigrationPlan]) -> Optional[MigrationAdapter]:
         """Route to adapter by targets[0].language; fall back to steps[0].adapter."""
+        if not plan:
+            return None
         # Primary: use targets list
         if plan.targets:
             adapter = self._find_adapter(plan.targets[0].language)
@@ -297,6 +403,7 @@ class MigrationOrchestrator:
             if adapter:
                 return adapter
         return None
+
 
     def _recommend_targets(self, profile: TechnologyProfile, adapters: list[MigrationAdapter]) -> list[dict]:
         recommendations = []
