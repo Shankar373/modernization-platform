@@ -138,22 +138,34 @@ export default function MigrationPlan() {
         </div>
       )}
 
-      <div className="flex gap-4">
-        {plan && (
-          <button className="btn btn-ghost" onClick={handleDryRun} disabled={dryRunLoading}>
-            {dryRunLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Running...</> : '🔬 Dry Run'}
+      <div className="flex gap-4" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        {plan && !dryRunResult && (
+          <button className="btn btn-primary" onClick={handleDryRun} disabled={dryRunLoading} style={{ minWidth: 180 }}>
+            {dryRunLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Running preview...</> : '🔬 Preview Changes (Dry Run)'}
           </button>
         )}
-        {plan && (
+        {plan && dryRunResult && !dryRunLoading && (
+          <button className="btn btn-ghost" onClick={handleDryRun} disabled={dryRunLoading}>
+            🔄 Re-run Preview
+          </button>
+        )}
+        {plan && dryRunResult?.success && (
           <button
+            id="btn-approve-execute"
             className="btn btn-success"
+            style={{ background: 'linear-gradient(135deg,#059669,#0d9488)', border: 'none', minWidth: 220 }}
             onClick={() => {
               sessionStorage.setItem(`plan_${plan.plan_id}`, JSON.stringify({ plan, workspacePath }));
               navigate(`/execute/${plan.plan_id}?wp=${encodeURIComponent(workspacePath)}`);
             }}
           >
-            ✅ Approve &amp; Execute Migration →
+            ✅ Accept & Execute Migration →
           </button>
+        )}
+        {plan && !dryRunResult && !dryRunLoading && (
+          <span className="text-sm text-muted" style={{ paddingLeft: 4 }}>
+            ↑ Run a preview first to see what will change
+          </span>
         )}
         <button className="btn btn-ghost" onClick={() => navigate(-1)}>← Back</button>
       </div>

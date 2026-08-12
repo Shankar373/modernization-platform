@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { MigrationProfile } from '../types';
 
 const API = axios.create({ baseURL: '/api/v1' });
 
@@ -40,6 +41,39 @@ export const migrateAll = (workspacePath: string, projectId: string, profile = '
     migration_profile: profile,
   });
 
+/**
+ * Step 1 of automated pipeline:
+ * Preview what ALL adapters would change — no files are modified.
+ * Returns per-adapter breakdown and total files_would_change.
+ */
+export const dryRunAll = (
+  workspacePath: string,
+  projectId: string,
+  profile: MigrationProfile = 'STANDARD'
+) =>
+  API.post('/migration/dry-run-all', {
+    workspace_path: workspacePath,
+    project_id: projectId,
+    migration_profile: profile,
+  });
+
+/**
+ * Step 2 of automated pipeline:
+ * User accepted the dry-run preview — execute ALL adapters in parallel.
+ * Requires approved=true as an explicit confirmation gate.
+ */
+export const approveAndExecute = (
+  workspacePath: string,
+  projectId: string,
+  profile: MigrationProfile = 'STANDARD'
+) =>
+  API.post('/migration/approve-execute', {
+    workspace_path: workspacePath,
+    project_id: projectId,
+    migration_profile: profile,
+    approved: true,
+  });
+
 export const getResult       = (resultId: string) => API.get(`/migration/result/${resultId}`);
 export const getReport       = (resultId: string) => API.get(`/migration/result/${resultId}/report`);
 export const getChangedFiles = (resultId: string) => API.get(`/migration/result/${resultId}/files`);
@@ -52,5 +86,3 @@ export const downloadModernizedZip = (resultId: string) => {
   link.click();
   document.body.removeChild(link);
 };
-
-

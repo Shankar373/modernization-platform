@@ -20,9 +20,10 @@ router = APIRouter()
 _orchestrator = MigrationOrchestrator()
 _scanner = UniversalScanner()
 
-# In-memory plan/result store (replace with DB in production)
+# In-memory stores (replace with DB in production)
 _plans: dict = {}
 _results: dict = {}
+_dry_run_all_results: dict = {}   # stores dry-run-all previews keyed by project_id
 
 
 class PlanRequest(BaseModel):
@@ -48,6 +49,20 @@ class MigrateAllRequest(BaseModel):
     workspace_path: str
     project_id: str
     migration_profile: MigrationProfile = MigrationProfile.STANDARD
+
+
+class DryRunAllRequest(BaseModel):
+    workspace_path: str
+    project_id: str
+    migration_profile: MigrationProfile = MigrationProfile.STANDARD
+
+
+class ApproveAndExecuteRequest(BaseModel):
+    """Accept the dry-run result and kick off the full migration."""
+    workspace_path: str
+    project_id: str
+    migration_profile: MigrationProfile = MigrationProfile.STANDARD
+    approved: bool = True
 
 
 @router.post("/migration/plan")
@@ -112,6 +127,65 @@ async def execute_migration(request: ExecuteRequest):
         return result.model_dump()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Migration failed: {e}\n{traceback.format_exc()[:800]}")
+
+
+@router.post("/migration/dry-run-all")
+async def dry_run_all(request: DryRunAllRequest):
+    """
+    Preview ALL adapters in parallel without modifying any files.
+    Returns a per-adapter breakdown of what would change.
+    The result is cached by project_id so /migration/approve-execute can
+    immediately kick off the migration when the user accepts.
+    """
+    try:
+        preview = await asyncio.to_thread(
+            _orchestrator.dry_run_all,
+            request.workspace_path,
+            request.project_id,
+            request.migration_profile,
+        )
+        # Cache for the approve step
+        _dry_run_all_results[request.project_id] = {
+            "preview": preview,
+            "workspace_path": request.workspace_path,
+            "migration_profile": request.migration_profile,
+        }
+        return preview
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dry-run-all failed: {e}\n{traceback.format_exc()[:800]}")
+
+
+@router.post("/migration/approve-execute")
+async def approve_and_execute(request: ApproveAndExecuteRequest):
+    """
+    User accepted the dry-run preview — now execute the full migration.
+    Runs all adapters in parallel (same as migrate-all) and stores the result.
+    Requires approved=true for an explicit user confirmation gate.
+    """
+    if not request.approved:
+        raise HTTPException(status_code=400, detail="Execution requires explicit approval (approved=true).")
+    try:
+        result = await asyncio.to_thread(
+            _orchestrator.migrate_all,
+            request.workspace_path,
+            request.project_id,
+            request.migration_profile,
+        )
+        _results[result.result_id] = {
+            "result": result,
+            "plan_data": {
+                "workspace_path": request.workspace_path,
+                "plan": None,
+            },
+        }
+        # Clean up the dry-run cache
+        _dry_run_all_results.pop(request.project_id, None)
+        return result.model_dump()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Approved execution failed: {e}\n{traceback.format_exc()[:1200]}"
+        )
 
 
 @router.post("/migration/migrate-all")

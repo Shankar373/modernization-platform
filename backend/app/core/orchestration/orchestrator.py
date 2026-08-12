@@ -254,6 +254,79 @@ class MigrationOrchestrator:
 
         return result
 
+    def dry_run_all(
+        self,
+        workspace_path: str,
+        project_id: str,
+        migration_profile: MigrationProfile = MigrationProfile.STANDARD,
+    ) -> dict:
+        """
+        Dry-run ALL applicable adapters in parallel — no files are modified.
+
+        Returns a preview dict with:
+        - per_adapter: list of {language, adapter, files_would_change, notes, warnings}
+        - total_files_would_change: int
+        - adapters_found: list[str]
+        - summary: human-readable description
+        """
+        import concurrent.futures
+
+        adapters = self.get_applicable_adapters(workspace_path)
+        if not adapters:
+            return {
+                "success": False,
+                "total_files_would_change": 0,
+                "adapters_found": [],
+                "per_adapter": [],
+                "summary": "No applicable adapters found for this workspace.",
+            }
+
+        profile = self.scanner.scan(workspace_path)
+
+        def _dry_run_one(adapter: "MigrationAdapter") -> dict:
+            lang = adapter.language
+            try:
+                plan = adapter.create_plan(workspace_path, profile, "latest", migration_profile)
+                result = adapter.dry_run(workspace_path, plan)
+                return {
+                    "language": lang,
+                    "adapter": adapter.provider,
+                    "files_would_change": getattr(result, "files_would_change", 0),
+                    "notes": getattr(result, "notes", ""),
+                    "warnings": getattr(result, "warnings", []),
+                    "success": getattr(result, "success", True),
+                }
+            except Exception as exc:
+                return {
+                    "language": lang,
+                    "adapter": adapter.provider,
+                    "files_would_change": 0,
+                    "notes": f"Dry run skipped: {exc}",
+                    "warnings": [str(exc)],
+                    "success": False,
+                }
+
+        max_workers = min(len(adapters), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            per_adapter = list(pool.map(_dry_run_one, adapters))
+
+        total = sum(r["files_would_change"] for r in per_adapter)
+        adapter_names = [r["language"] for r in per_adapter if r["success"]]
+
+        return {
+            "success": True,
+            "total_files_would_change": total,
+            "adapters_found": adapter_names,
+            "per_adapter": per_adapter,
+            "workspace_path": workspace_path,
+            "project_id": project_id,
+            "migration_profile": migration_profile.value if hasattr(migration_profile, "value") else str(migration_profile),
+            "summary": (
+                f"{len(adapter_names)} adapter(s) will process {total} file(s): "
+                + ", ".join(adapter_names)
+            ),
+        }
+
     def migrate_all(
         self,
         workspace_path: str,

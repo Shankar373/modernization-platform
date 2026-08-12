@@ -87,3 +87,25 @@ export interface IngestResponse {
 }
 
 export type MigrationProfile = 'CONSERVATIVE' | 'STANDARD' | 'AGGRESSIVE';
+
+/** Per-adapter result from the dry-run-all preview. */
+export interface AdapterDryRunResult {
+  language: string;
+  adapter: string;
+  files_would_change: number;
+  notes: string;
+  warnings: string[];
+  success: boolean;
+}
+
+/** Full response from POST /migration/dry-run-all */
+export interface DryRunAllResult {
+  success: boolean;
+  total_files_would_change: number;
+  adapters_found: string[];
+  per_adapter: AdapterDryRunResult[];
+  workspace_path: string;
+  project_id: string;
+  migration_profile: string;
+  summary: string;
+}
