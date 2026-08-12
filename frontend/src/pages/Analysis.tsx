@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { analyzeRepo, dryRunAll, approveAndExecute } from '../api/client';
-import type { DryRunAllResult, AdapterDryRunResult, MigrationProfile } from '../types';
+import { analyzeRepo, dryRunAll, approveAndExecute, runDependencyAnalysis } from '../api/client';
+import type { DryRunAllResult, AdapterDryRunResult, MigrationProfile, Dependency } from '../types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -91,6 +91,11 @@ export default function Analysis() {
   const [dryRunError, setDryRunError] = useState('');
   const [execError, setExecError] = useState('');
 
+  // Integrated Dependency Analysis State
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [dependencyUpdatedFiles, setDependencyUpdatedFiles] = useState<string[]>([]);
+  const [dependenciesLoading, setDependenciesLoading] = useState(false);
+
   // Single-language advanced builder
   const [selectedLang, setSelectedLang]     = useState('');
   const [targetVersion, setTargetVersion]   = useState('');
@@ -105,30 +110,43 @@ export default function Analysis() {
       .catch(e => { setError(e?.response?.data?.detail || 'Analysis failed'); setLoading(false); });
   }, [projectId, workspacePath]);
 
-  // ── Step 1: Dry-run ALL ─────────────────────────────────────────────────────
+  // ── Step 1: Dry-run ALL (Modernization + Dependencies) ──────────────────────
   const handleDryRunAll = async () => {
     if (!projectId) return;
     setStage('dry-run-running');
     setDryRunError('');
     setPreview(null);
+    setDependencies([]);
+    setDependenciesLoading(true);
+
     try {
-      const res = await dryRunAll(workspacePath, projectId, profile);
-      setPreview(res.data as DryRunAllResult);
+      // Run both codebase modernization dry run and dependency analysis in parallel
+      const [modernizationRes, dependencyRes] = await Promise.all([
+        dryRunAll(workspacePath, projectId, profile),
+        runDependencyAnalysis(workspacePath, projectId, true),
+      ]);
+
+      setPreview(modernizationRes.data as DryRunAllResult);
+      setDependencies((dependencyRes.data?.dependencies || []) as Dependency[]);
       setStage('dry-run-done');
     } catch (e: any) {
       setDryRunError(e?.response?.data?.detail || 'Dry run failed. Please try again.');
       setStage('analysis');
+    } finally {
+      setDependenciesLoading(false);
     }
   };
 
-  // ── Step 2: Accept → Execute ────────────────────────────────────────────────
+  // ── Step 2: Accept → Execute (Modernization + Dependencies) ─────────────────
   const handleApproveExecute = async () => {
     if (!projectId) return;
     setStage('executing');
     setExecError('');
     try {
+      // Execute both code refactoring and dependency upgrades
       const res = await approveAndExecute(workspacePath, projectId, profile);
       const resultId = res.data.result_id;
+
       // Persist to history
       sessionStorage.setItem(`run_${resultId}`, JSON.stringify({
         resultId,
@@ -139,6 +157,7 @@ export default function Analysis() {
         filesScanned: res.data.statistics?.files_scanned ?? 0,
         completedAt: res.data.completed_at || new Date().toISOString(),
       }));
+
       setStage('done');
       setTimeout(() => navigate(`/results/${resultId}?wp=${encodeURIComponent(workspacePath)}&mode=all`), 800);
     } catch (e: any) {
@@ -175,6 +194,9 @@ export default function Analysis() {
 
   const isRunning = stage === 'dry-run-running' || stage === 'executing' || stage === 'done';
 
+  // Filter dependencies to show only those that have updates available
+  const outdatedDependencies = dependencies.filter(d => d.status === 'UPDATE_AVAILABLE');
+
   return (
     <div>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -186,20 +208,10 @@ export default function Analysis() {
             &nbsp;·&nbsp;{techProfile?.languages?.length || 0} languages detected
           </p>
         </div>
-        <div className="flex gap-3 items-center">
-          <button
-            className="btn btn-secondary"
-            style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            onClick={() => navigate(`/dependencies?wp=${encodeURIComponent(workspacePath)}&project=${projectId || ''}`)}
-          >
-            🔍 Analyze Dependencies
-          </button>
-          <span className={`badge ${supported_languages.length > 0 ? 'badge-available' : 'badge-unavailable'}`}>
-            {supported_languages.length > 0 ? `${supported_languages.length} supported` : 'Assessment only'}
-          </span>
-        </div>
+        <span className={`badge ${supported_languages.length > 0 ? 'badge-available' : 'badge-unavailable'}`}>
+          {supported_languages.length > 0 ? `${supported_languages.length} supported` : 'Assessment only'}
+        </span>
       </div>
-
 
       {/* ── ⚡ AUTOMATED PIPELINE CARD ──────────────────────────────────────── */}
       {supported_languages.length > 0 && (
@@ -282,17 +294,17 @@ export default function Analysis() {
             <div>
               <div className="flex items-center gap-3" style={{ marginBottom: 16 }}>
                 <span className="spinner" style={{ width: 22, height: 22 }} />
-                <span style={{ fontWeight: 600 }}>Previewing changes across all adapters...</span>
+                <span style={{ fontWeight: 600 }}>Previewing changes and analyzing packages...</span>
               </div>
               <p className="text-sm text-muted">
-                Running dry-run in parallel for: {supported_languages.map((l: string) => (
+                Running codebase dry-run and registry dependency checks in parallel for: {supported_languages.map((l: string) => (
                   <span key={l} style={{ marginRight: 6 }}>{LANG_ICONS[l] || '📦'} {l}</span>
                 ))}
               </p>
             </div>
           )}
 
-          {/* ── STAGE: DRY-RUN DONE — show preview table ───────────────────── */}
+          {/* ── STAGE: DRY-RUN DONE — show preview tables ───────────────────── */}
           {stage === 'dry-run-done' && preview && (
             <div>
               {/* Summary banner */}
@@ -303,22 +315,58 @@ export default function Analysis() {
               }}>
                 <span style={{ fontSize: 28 }}>🔍</span>
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontWeight: 700, marginBottom: 2 }}>Preview Complete — no files were modified</p>
-                  <p className="text-sm text-muted">{preview.summary}</p>
+                  <p style={{ fontWeight: 700, marginBottom: 2 }}>Preview Complete — no files were modified yet</p>
+                  <p className="text-sm text-muted">
+                    {preview.summary} · {outdatedDependencies.length} dependencies have newer stable versions available.
+                  </p>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--color-accent-2)' }}>
-                    {preview.total_files_would_change}
+                <div style={{ display: 'flex', gap: 20, textAlign: 'right' }}>
+                  <div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--color-accent-2)' }}>
+                      {preview.total_files_would_change}
+                    </div>
+                    <div className="text-sm text-muted">code files</div>
                   </div>
-                  <div className="text-sm text-muted">files to update</div>
+                  <div style={{ borderLeft: '1px solid var(--color-border)', paddingLeft: 20 }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>
+                      {outdatedDependencies.length}
+                    </div>
+                    <div className="text-sm text-muted">outdated deps</div>
+                  </div>
                 </div>
               </div>
 
-              {/* Per-adapter rows */}
-              <div style={{ marginBottom: 16 }}>
-                {preview.per_adapter.map((r) => (
-                  <AdapterRow key={r.language} r={r} isRunning={false} />
-                ))}
+              {/* Grid: Code modifications and dependency upgrades */}
+              <div style={{ display: 'grid', gridTemplateColumns: outdatedDependencies.length > 0 ? '1.2fr 1fr' : '1fr', gap: 20, marginBottom: 20 }}>
+                {/* Code files */}
+                <div>
+                  <h4 style={{ marginBottom: 12, fontSize: 13, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.05em' }}>Code Modifications</h4>
+                  {preview.per_adapter.map((r) => (
+                    <AdapterRow key={r.language} r={r} isRunning={false} />
+                  ))}
+                </div>
+
+                {/* Dependencies */}
+                {outdatedDependencies.length > 0 && (
+                  <div>
+                    <h4 style={{ marginBottom: 12, fontSize: 13, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.05em' }}>Dependency Upgrades</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+                      {outdatedDependencies.map(dep => (
+                        <div key={`${dep.name}-${dep.source_file}`} style={{
+                          padding: '10px 14px', borderRadius: 8,
+                          background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)',
+                          display: 'flex', alignItems: 'center', gap: 10, fontSize: 12,
+                        }}>
+                          <span style={{ fontWeight: 600, flex: 1 }}>{dep.name}</span>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>{dep.current_version}</span>
+                          <span style={{ color: '#f59e0b' }}>→</span>
+                          <span style={{ fontFamily: 'monospace', color: '#34d399', fontWeight: 700 }}>{dep.latest_stable_version}</span>
+                          <span className="badge badge-assessment" style={{ fontSize: 9 }}>{dep.source_file}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {execError && (
@@ -369,7 +417,7 @@ export default function Analysis() {
                 </div>
               )}
               <p className="text-sm text-muted" style={{ marginTop: 12 }}>
-                🔒 All adapters running simultaneously. This may take 30–120 seconds depending on project size.
+                🔒 Modernization adapters and dependency updates running simultaneously. This may take 30–120 seconds.
               </p>
             </div>
           )}
