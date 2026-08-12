@@ -22,6 +22,11 @@ from app.adapters.json.adapter import JsonFormatterAdapter
 from app.adapters.yaml.adapter import YamlFormatterAdapter
 from app.adapters.markdown.adapter import MarkdownFormatterAdapter
 from app.adapters.javascript.adapter import JavaScriptPrettierAdapter
+from app.adapters.go.adapter import GoAdapter
+from app.adapters.php.adapter import PhpAdapter
+from app.adapters.shell.adapter import ShellAdapter
+from app.adapters.generic.adapter import GenericFallbackAdapter
+
 from app.capabilities.registry import registry
 from app.core.domain.models import (
     CapabilityStatus,
@@ -35,8 +40,8 @@ from app.core.domain.models import (
 from app.discovery.scanner import UniversalScanner
 
 
-# ── Adapter Registry ──────────────────────────────────────────────────────────
-# Add new adapters here — the orchestrator logic stays language-agnostic.
+# ── Adapter Registry & Dynamic Discovery ─────────────────────────────────────
+# All language connectors register here for automatic execution during migrations.
 
 _ADAPTERS: list[MigrationAdapter] = [
     JavaOpenRewriteAdapter(),
@@ -47,9 +52,11 @@ _ADAPTERS: list[MigrationAdapter] = [
     YamlFormatterAdapter(),
     MarkdownFormatterAdapter(),
     JavaScriptPrettierAdapter(),
+    GoAdapter(),
+    PhpAdapter(),
+    ShellAdapter(),
+    GenericFallbackAdapter(),
 ]
-
-
 
 
 _SKIP_SCAN_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git",
@@ -57,17 +64,24 @@ _SKIP_SCAN_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git",
 
 # ── Extension → adapter language map (used in fast pre-scan) ─────────────────
 _EXT_TO_LANG: dict[str, set[str]] = {
-    ".py":    {"python"},
-    ".html":  {"html"}, ".htm": {"html"},
-    ".css":   {"css"},  ".scss": {"css"}, ".sass": {"css"},
-    ".js":    {"javascript"}, ".jsx": {"javascript"},
-    ".ts":    {"javascript"}, ".tsx": {"javascript"},
-    ".mjs":   {"javascript"}, ".cjs": {"javascript"},
-    ".json":  {"json"},
-    ".yaml":  {"yaml"}, ".yml": {"yaml"},
-    ".md":    {"markdown"}, ".markdown": {"markdown"},
-    ".java":  {"java"},
+    ".py":        {"python"},
+    ".html":      {"html"}, ".htm": {"html"},
+    ".css":       {"css"},  ".scss": {"css"}, ".sass": {"css"},
+    ".js":        {"javascript"}, ".jsx": {"javascript"},
+    ".ts":        {"javascript"}, ".tsx": {"javascript"},
+    ".mjs":       {"javascript"}, ".cjs": {"javascript"},
+    ".json":      {"json"},
+    ".yaml":      {"yaml"}, ".yml": {"yaml"},
+    ".md":        {"markdown"}, ".markdown": {"markdown"},
+    ".java":      {"java"},
+    ".go":        {"go"},
+    ".php":       {"php"}, ".phtml": {"php"},
+    ".sh":        {"shell"}, ".bash": {"shell"}, ".zsh": {"shell"},
+    ".c":         {"generic"}, ".cpp": {"generic"}, ".cs": {"generic"},
+    ".rs":        {"generic"}, ".kt": {"generic"}, ".swift": {"generic"},
+    ".sql":       {"generic"}, ".toml": {"generic"}, ".xml": {"generic"},
 }
+
 
 
 def _collect_extensions(workspace_path: str) -> frozenset[str]:
