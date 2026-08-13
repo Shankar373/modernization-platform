@@ -41,7 +41,14 @@ from app.dependency_analysis.updater import update_requirements_txt
 from app.dependency_analysis.validator import validate_requirements_txt
 
 
+@pytest.fixture(autouse=True)
+def clear_registry_cache():
+    from app.dependency_analysis.registry import _latest_version_cache
+    _latest_version_cache.clear()
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _make_dep(
     name: str,
@@ -673,3 +680,67 @@ class TestEndToEnd:
         assert "package-lock.json" not in result.changed_files
         # Content must be byte-for-byte identical
         assert lock.read_text() == original
+
+
+    def test_csharp_dependency_parsing(self, tmp_path):
+        from app.dependency_analysis.service import parse_packages_config, parse_csproj
+
+        # Test packages.config parser
+        (tmp_path / "MyProject.csproj").write_text("<Project></Project>", encoding="utf-8")
+        pkg_config = tmp_path / "packages.config"
+        pkg_config.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<packages>
+  <package id="AForge" version="2.2.5" targetFramework="net452" />
+  <package id="Newtonsoft.Json" version="13.0.1" targetFramework="net452" />
+</packages>""", encoding="utf-8")
+
+        deps = parse_packages_config(str(pkg_config))
+        assert len(deps) == 2
+        assert any(d.name == "AForge" and d.current_version == "2.2.5" and d.project_name == "MyProject" for d in deps)
+        assert any(d.name == "Newtonsoft.Json" and d.current_version == "13.0.1" and d.project_name == "MyProject" for d in deps)
+
+        # Test .csproj parser (both PackageReference and legacy HintPath)
+        csproj = tmp_path / "AForge.Wpf.csproj"
+        csproj.write_text("""<Project ToolsVersion="14.0" DefaultTargets="Build">
+  <ItemGroup>
+    <PackageReference Include="EntityFramework" Version="6.4.4" />
+    <Reference Include="AForge.Imaging, Version=2.2.5.0">
+      <HintPath>..\\packages\\AForge.Imaging.2.2.5\\lib\\AForge.Imaging.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        deps2 = parse_csproj(str(csproj))
+        assert len(deps2) == 2
+        assert any(d.name == "EntityFramework" and d.current_version == "6.4.4" and d.project_name == "AForge.Wpf" for d in deps2)
+        assert any(d.name == "AForge.Imaging" and d.current_version == "2.2.5" and d.project_name == "AForge.Wpf" for d in deps2)
+
+    def test_csharp_e2e_service_analysis(self, tmp_path):
+        from app.dependency_analysis.service import DependencyAnalysisService
+
+        # Setup C# project in temp path
+        csproj = tmp_path / "AForge.Wpf.csproj"
+        csproj.write_text("""<Project ToolsVersion="14.0" DefaultTargets="Build">
+  <ItemGroup>
+    <Reference Include="AForge, Version=2.2.5.0">
+      <HintPath>..\\packages\\AForge.2.2.5\\lib\\AForge.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        (tmp_path / "packages.config").write_text("""<?xml version="1.0" encoding="utf-8"?>
+<packages>
+  <package id="AForge" version="2.2.5" targetFramework="net452" />
+</packages>""", encoding="utf-8")
+
+        svc = DependencyAnalysisService()
+        with patch("app.dependency_analysis.service.get_latest_stable_version", return_value="2.2.5"):
+            result = svc.analyze(str(tmp_path))
+
+        assert len(result.dependencies) == 1  # Deduplicated on name + project_name!
+        dep = result.dependencies[0]
+        assert dep.name == "AForge"
+        assert dep.current_version == "2.2.5"
+        assert dep.ecosystem == DependencyEcosystem.DOTNET
+        assert dep.project_name == "AForge.Wpf"
+

@@ -50,6 +50,8 @@ class Dependency(BaseModel):
     # Optional extras / environment markers preserved verbatim
     extras: Optional[str] = None            # e.g.  "[security]"
     environment_marker: Optional[str] = None  # e.g.  "; python_version >= '3.8'"
+    project_name: Optional[str] = None
+
 
 
 class DependencyFile(BaseModel):

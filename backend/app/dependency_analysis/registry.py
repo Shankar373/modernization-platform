@@ -146,6 +146,18 @@ def _latest_maven(coordinate: str) -> Optional[str]:
         return stable[0]
 
 
+def _latest_nuget(name: str) -> Optional[str]:
+    """Query NuGet Search API for the latest stable release of the package."""
+    url = f"https://api-v2v3search-0.nuget.org/query?q=packageid:{name.lower()}&prerelease=false"
+    data = _http_get_json(url)
+    if not data:
+        return None
+    for item in data.get("data", []):
+        if item.get("id", "").lower() == name.lower():
+            return item.get("version")
+    return None
+
+
 _latest_version_cache: dict[tuple[str, DependencyEcosystem], Optional[str]] = {}
 
 
@@ -169,10 +181,13 @@ def get_latest_stable_version(
             val = _latest_npm(name)
         elif ecosystem == DependencyEcosystem.JAVA:
             val = _latest_maven(name)
+        elif ecosystem == DependencyEcosystem.DOTNET:
+            val = _latest_nuget(name)
     except Exception as exc:
         log.warning("Unexpected error resolving %s/%s: %s", ecosystem, name, exc)
         val = None
 
     _latest_version_cache[cache_key] = val
     return val
+
 

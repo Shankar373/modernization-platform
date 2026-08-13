@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import re
 from pathlib import Path
 from typing import List
+
 
 from app.dependency_analysis.comparator import compare_dependency
 from app.dependency_analysis.detector import DependencyFileDetector
@@ -83,6 +85,7 @@ class DependencyAnalysisService:
 
         # Step 2 — parse (only non-lockfiles)
         all_deps: List[Dependency] = []
+        seen_deps = set()
         for dep_file in dep_files:
             if dep_file.is_lockfile:
                 result.warnings.append(
@@ -90,7 +93,14 @@ class DependencyAnalysisService:
                 )
                 continue
             parsed = self._parse_file(workspace_path, dep_file)
-            all_deps.extend(parsed)
+            for d in parsed:
+                # Set correct relative source_file path
+                d.source_file = dep_file.path
+                # Deduplicate by (name, project_name)
+                dep_key = (d.name.lower(), (d.project_name or "").lower())
+                if dep_key not in seen_deps:
+                    seen_deps.add(dep_key)
+                    all_deps.append(d)
 
         result.dependencies = all_deps
 
@@ -180,6 +190,12 @@ class DependencyAnalysisService:
                 if name == "pom.xml":
                     return parse_pom_xml(abs_path)
 
+            elif dep_file.ecosystem == DependencyEcosystem.DOTNET:
+                if name == "packages.config":
+                    return parse_packages_config(abs_path)
+                elif name.endswith(".csproj"):
+                    return parse_csproj(abs_path)
+
         except Exception as exc:
             log.warning("Parser error for %s: %s", dep_file.path, exc)
 
@@ -237,3 +253,115 @@ class DependencyAnalysisService:
                 changed.append(rel_path)
 
         return changed
+
+
+def parse_packages_config(file_path: str) -> List[Dependency]:
+    """Parse packages.config NuGet dependencies."""
+    deps: List[Dependency] = []
+    path = Path(file_path)
+    rel = path.name
+
+    # Resolve project name
+    project_name = None
+    try:
+        csproj_files = list(path.parent.glob("*.csproj"))
+        if csproj_files:
+            project_name = csproj_files[0].stem
+        else:
+            project_name = path.parent.name
+    except Exception:
+        project_name = path.parent.name
+
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+        for m in re.finditer(r'<package\s+([^>]+?)/?>', content, re.IGNORECASE):
+            attrs = dict(re.findall(r'([\w\-.:]+)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(1)))
+            name = attrs.get("id")
+            version = attrs.get("version")
+            if name:
+                deps.append(Dependency(
+                    name=name,
+                    current_version=version,
+                    version_constraint=f"=={version}" if version else None,
+                    source_file=rel,
+                    ecosystem=DependencyEcosystem.DOTNET,
+                    status=DependencyStatus.LOOKUP_FAILED,
+                    project_name=project_name,
+                ))
+    except Exception:
+        pass
+
+    return deps
+
+
+def parse_csproj(file_path: str) -> List[Dependency]:
+    """Parse PackageReference tags and legacy HintPath NuGet references from .csproj."""
+    deps: List[Dependency] = []
+    path = Path(file_path)
+    rel = path.name
+    project_name = path.stem
+
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+
+        # 1. PackageReference tags
+        matches = re.finditer(r'<PackageReference\s+([^>]+?)(?:/>|>(.*?)</PackageReference>)', content, re.DOTALL | re.IGNORECASE)
+        for m in matches:
+            attrs_str = m.group(1)
+            inner_content = m.group(2) if m.group(2) else ""
+            attrs = dict(re.findall(r'([\w\-.:]+)\s*=\s*[\'"]([^\'"]+)[\'"]', attrs_str))
+            name = attrs.get("Include") or attrs.get("Update")
+            if not name:
+                continue
+            version = attrs.get("Version")
+            if not version and inner_content:
+                v_match = re.search(r'<Version>\s*(.*?)\s*</Version>', inner_content, re.IGNORECASE)
+                if v_match:
+                    version = v_match.group(1).strip()
+            deps.append(Dependency(
+                name=name,
+                current_version=version,
+                version_constraint=f"=={version}" if version else None,
+                source_file=rel,
+                ecosystem=DependencyEcosystem.DOTNET,
+                status=DependencyStatus.LOOKUP_FAILED,
+                project_name=project_name,
+            ))
+
+        # 2. Legacy Reference tags with HintPath pointing to packages/
+        ref_matches = re.finditer(r'<Reference\s+([^>]+?)>(.*?)</Reference>', content, re.DOTALL | re.IGNORECASE)
+        for m in ref_matches:
+            attrs_str = m.group(1)
+            inner_content = m.group(2)
+
+            hint_match = re.search(r'<HintPath>\s*(.*?)\s*</HintPath>', inner_content, re.IGNORECASE)
+            if not hint_match:
+                continue
+
+            hint_path = hint_match.group(1).strip().replace("\\", "/")
+            if "packages/" not in hint_path.lower():
+                continue
+
+            m_pkg = re.search(r'packages/([^/]+)', hint_path, re.IGNORECASE)
+            if not m_pkg:
+                continue
+
+            folder_name = m_pkg.group(1)
+            m_split = re.match(r"^([a-zA-Z0-9._\-]+?)\.([0-9]+(?:\.[0-9]+)*[a-zA-Z0-9.\-]*)$", folder_name)
+            if m_split:
+                pkg_name = m_split.group(1)
+                pkg_version = m_split.group(2)
+                deps.append(Dependency(
+                    name=pkg_name,
+                    current_version=pkg_version,
+                    version_constraint=f"=={pkg_version}",
+                    source_file=rel,
+                    ecosystem=DependencyEcosystem.DOTNET,
+                    status=DependencyStatus.LOOKUP_FAILED,
+                    project_name=project_name,
+                ))
+    except Exception:
+        pass
+
+    return deps
+
