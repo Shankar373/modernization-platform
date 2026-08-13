@@ -2,17 +2,17 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getCapabilities } from "../api/client";
 
-const CONNECTORS = [
-  { lang: "Java",        tool: "OpenRewrite",    status: "AVAILABLE",       icon: "☕", color: "#f97316", desc: "Full transformation engine" },
-  { lang: "Python",      tool: "Ruff",           status: "AVAILABLE",       icon: "🐍", color: "#3b82f6", desc: "AST-level rewrites" },
-  { lang: "HTML",        tool: "BeautifulSoup4", status: "AVAILABLE",       icon: "🌐", color: "#10b981", desc: "DOM tree transformations" },
-  { lang: "CSS",         tool: "Custom Parser",  status: "AVAILABLE",       icon: "🎨", color: "#06b6d4", desc: "Property modernization" },
-  { lang: "JavaScript",  tool: "jscodeshift",    status: "NOT_AVAILABLE",   icon: "🟨", color: "#eab308", desc: "Codemod framework — planned" },
-  { lang: "TypeScript",  tool: "ts-morph",       status: "NOT_AVAILABLE",   icon: "🔷", color: "#3b82f6", desc: "Type-safe AST — planned" },
-  { lang: "C# / .NET",   tool: "Roslyn",         status: "NOT_AVAILABLE",   icon: "🔷", color: "#a855f7", desc: "Compiler-as-a-service — planned" },
-  { lang: "Go",          tool: "go fix",         status: "NOT_AVAILABLE",   icon: "🐹", color: "#22d3ee", desc: "go fix codemod — planned" },
-  { lang: "PHP",         tool: "Rector",         status: "NOT_AVAILABLE",   icon: "🐘", color: "#8b5cf6", desc: "Automated refactoring — planned" },
-  { lang: "COBOL",       tool: "—",              status: "ASSESSMENT_ONLY", icon: "🏛️", color: "#94a3b8", desc: "Assessment & inventory only" },
+const INITIAL_CONNECTORS = [
+  { lang: "Java",        tool: "OpenRewrite",    status: "AVAILABLE",       icon: "☕", color: "#f97316", desc: "Full transformation engine", apiLang: "java" },
+  { lang: "Python",      tool: "Ruff",           status: "AVAILABLE",       icon: "🐍", color: "#3b82f6", desc: "AST-level rewrites", apiLang: "python" },
+  { lang: "HTML",        tool: "BeautifulSoup4", status: "AVAILABLE",       icon: "🌐", color: "#10b981", desc: "DOM tree transformations", apiLang: "html" },
+  { lang: "CSS",         tool: "Custom Parser",  status: "AVAILABLE",       icon: "🎨", color: "#06b6d4", desc: "Property modernization", apiLang: "css" },
+  { lang: "JavaScript",  tool: "jscodeshift",    status: "NOT_AVAILABLE",   icon: "🟨", color: "#eab308", desc: "Codemod framework — planned", apiLang: "javascript" },
+  { lang: "TypeScript",  tool: "ts-morph",       status: "NOT_AVAILABLE",   icon: "🔷", color: "#3b82f6", desc: "Type-safe AST — planned", apiLang: "typescript" },
+  { lang: "C# / .NET",   tool: "Roslyn",         status: "NOT_AVAILABLE",   icon: "🔷", color: "#a855f7", desc: "Compiler-as-a-service", apiLang: "csharp" },
+  { lang: "Go",          tool: "go fix",         status: "NOT_AVAILABLE",   icon: "🐹", color: "#22d3ee", desc: "go fix codemod — planned", apiLang: "go" },
+  { lang: "PHP",         tool: "Rector",         status: "NOT_AVAILABLE",   icon: "🐘", color: "#8b5cf6", desc: "Automated refactoring — planned", apiLang: "php" },
+  { lang: "COBOL",       tool: "—",              status: "ASSESSMENT_ONLY", icon: "🏛️", color: "#94a3b8", desc: "Assessment & inventory only", apiLang: "cobol" },
 ];
 
 const FLOW_STEPS = [
@@ -76,13 +76,34 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashStats>(loadStats());
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
   const [hoveredConnector, setHoveredConnector] = useState<string | null>(null);
+  const [connectors, setConnectors] = useState(INITIAL_CONNECTORS);
 
   useEffect(() => {
-    getCapabilities().then(() => setBackendUp(true)).catch(() => setBackendUp(false));
+    getCapabilities()
+      .then((res) => {
+        setBackendUp(true);
+        const caps = res.data?.capabilities || [];
+        const updated = INITIAL_CONNECTORS.map(conn => {
+          // Find if there's any active capability for this connector language
+          const matchingCaps = caps.filter((c: any) => c.language.toLowerCase() === conn.apiLang.toLowerCase());
+          if (matchingCaps.length > 0) {
+            const hasAvailable = matchingCaps.some((c: any) => c.status === "available" || c.status === "AVAILABLE");
+            const hasPartial = matchingCaps.some((c: any) => c.status === "partial" || c.status === "PARTIAL");
+            if (hasAvailable) {
+              return { ...conn, status: "AVAILABLE" };
+            } else if (hasPartial) {
+              return { ...conn, status: "PARTIAL" };
+            }
+          }
+          return conn;
+        });
+        setConnectors(updated);
+      })
+      .catch(() => setBackendUp(false));
     setStats(loadStats());
   }, []);
 
-  const available = CONNECTORS.filter(c => c.status === "AVAILABLE").length;
+  const available = connectors.filter(c => c.status === "AVAILABLE" || c.status === "PARTIAL").length;
 
   return (
     <div className="animate-fade-up">
@@ -150,13 +171,13 @@ export default function Dashboard() {
 
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
-          <div><h3>Migration Connectors</h3><p className="text-muted text-sm" style={{ marginTop: 2 }}>{available} of {CONNECTORS.length} adapters · hover for details</p></div>
+          <div><h3>Migration Connectors</h3><p className="text-muted text-sm" style={{ marginTop: 2 }}>{available} of {connectors.length} adapters · hover for details</p></div>
           <span className="badge badge-available">{available} Active</span>
         </div>
         <div className="card-grid">
-          {CONNECTORS.map(c => {
-            const cls = c.status === "AVAILABLE" ? "available" : c.status === "ASSESSMENT_ONLY" ? "assessment" : "unavailable";
-            const badgeCls = c.status === "AVAILABLE" ? "badge-available" : c.status === "ASSESSMENT_ONLY" ? "badge-assessment" : "badge-unavailable";
+          {connectors.map(c => {
+            const cls = c.status === "AVAILABLE" ? "available" : c.status === "PARTIAL" ? "available" : c.status === "ASSESSMENT_ONLY" ? "assessment" : "unavailable";
+            const badgeCls = c.status === "AVAILABLE" ? "badge-available" : c.status === "PARTIAL" ? "badge-partial" : c.status === "ASSESSMENT_ONLY" ? "badge-assessment" : "badge-unavailable";
             return (
               <div key={c.lang} className={`connector-card ${cls}`}
                 onMouseEnter={() => setHoveredConnector(c.lang)} onMouseLeave={() => setHoveredConnector(null)}>
@@ -166,7 +187,7 @@ export default function Dashboard() {
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{c.lang}</div>
                     <div className="text-muted text-xs">{c.tool}</div>
                   </div>
-                  {c.status === "AVAILABLE" && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", animation: "pulse-dot 2s infinite" }} />}
+                  {(c.status === "AVAILABLE" || c.status === "PARTIAL") && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", animation: "pulse-dot 2s infinite" }} />}
                 </div>
                 <span className={`badge ${badgeCls}`} style={{ fontSize: 10 }}>{c.status.replace(/_/g, " ")}</span>
                 {hoveredConnector === c.lang && <p className="text-muted text-xs" style={{ marginTop: 8, lineHeight: 1.5 }}>{c.desc}</p>}

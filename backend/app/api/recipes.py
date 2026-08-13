@@ -498,10 +498,26 @@ async def recommend_recipes(req: RecommendRequest):
     Return a ranked list of recommended recipes for the project.
     Uses rule-based scoring on languages, frameworks, dependencies, and version compatibility gates.
     """
+    from app.capabilities.registry import registry
+    from app.core.domain.models import CapabilityStatus
+
     scored: List[Dict] = []
     for recipe in RECIPE_CATALOG:
         is_applicable = _is_version_compatible(recipe, req.source_version, req.target_version)
         if not is_applicable:
+            continue
+
+        # Check tool availability for this language in registry
+        lang = recipe.get("language")
+        is_tool_available = True
+        if lang and lang != "all":
+            caps = registry.get_for_language(lang)
+            is_tool_available = bool(caps and any(
+                c.status in (CapabilityStatus.AVAILABLE, CapabilityStatus.PARTIAL)
+                for c in caps
+            ))
+
+        if not is_tool_available:
             continue
 
         score, reasons = _score_recipe(recipe, req)
