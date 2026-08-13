@@ -234,7 +234,59 @@ RECIPE_CATALOG: List[Dict[str, Any]] = [
         "min_version": None, "max_version": None,
         "priority": 5, "risk": "LOW", "estimated_impact": "Automate linting and continuous builds tests"
     },
+    # ── C# / .NET ─────────────────────────────────────────────────────────────
+    {
+        "id": "cs-nullable-ref",
+        "name": "Enable Nullable Reference Types",
+        "description": "Enable <Nullable>enable</Nullable> in .csproj and annotate all reference types. Roslyn flow analysis eliminates null dereference bugs at compile time.",
+        "language": "csharp", "category": "upgrade", "complexity": "medium",
+        "tags": ["nullable", "dotnet", "csharp", "safety"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "8.0", "max_version": None,
+        "priority": 8, "risk": "MEDIUM", "estimated_impact": "Eliminate null-reference runtime exceptions via Roslyn static analysis"
+    },
+    {
+        "id": "cs-net6-upgrade",
+        "name": ".NET Framework → .NET 6/8 Upgrade",
+        "description": "Migrate TargetFramework from net4x / netstandard2.0 to net6.0 or net8.0. Updates System.* namespace usage, removes deprecated APIs, and migrates app host configuration.",
+        "language": "csharp", "category": "upgrade", "complexity": "high",
+        "tags": ["dotnet", "csharp", "upgrade", "net6", "net8", "migration"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 15, "risk": "HIGH", "estimated_impact": "Long-term support framework and performance improvements (AOT eligible)"
+    },
+    {
+        "id": "cs-var-keyword",
+        "name": "Local Variable Type Inference (var)",
+        "description": "Replace verbose explicit local variable declarations with var where the type is obvious. Improves readability without losing type safety.",
+        "language": "csharp", "category": "style", "complexity": "low",
+        "tags": ["style", "csharp", "dotnet", "var"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "3.0", "max_version": None,
+        "priority": 2, "risk": "LOW", "estimated_impact": "Reduce boilerplate type annotations in local scopes"
+    },
+    {
+        "id": "cs-async-await",
+        "name": "Synchronous → async/await Migration",
+        "description": "Convert blocking synchronous I/O patterns (Thread.Sleep, .Result, .Wait()) to async/await with Task-based asynchronous pattern (TAP). Improves throughput under load.",
+        "language": "csharp", "category": "upgrade", "complexity": "high",
+        "tags": ["async", "await", "dotnet", "csharp", "performance"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "5.0", "max_version": None,
+        "priority": 10, "risk": "HIGH", "estimated_impact": "Thread pool efficiency and I/O-bound scalability improvements"
+    },
+    {
+        "id": "cs-dependency-injection",
+        "name": "Manual DI → Microsoft.Extensions.DI",
+        "description": "Migrate from manual service instantiation / static service locator patterns to Microsoft.Extensions.DependencyInjection. Register services in IServiceCollection, use constructor injection throughout.",
+        "language": "csharp", "category": "upgrade", "complexity": "medium",
+        "tags": ["di", "dependency-injection", "aspnet", "csharp", "dotnet"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 9, "risk": "MEDIUM", "estimated_impact": "Loosely coupled, testable service architecture for ASP.NET Core"
+    },
 ]
+
 
 _CATALOG_BY_ID: Dict[str, Dict] = {r["id"]: r for r in RECIPE_CATALOG}
 

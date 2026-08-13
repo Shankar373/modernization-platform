@@ -13,14 +13,11 @@ import {
 import type {
   TechnologyProfile,
   DependencyAnalysisResult,
-  DependencyUpdateAction,
   Recipe,
   RecipeAnalysisResult,
   MigrationPlan,
   GitCheckpointResult,
 } from '../types';
-
-// ── Types ──────────────────────────────────────────────────────────────────────
 
 type StageKey =
   | 'discovery'
@@ -61,13 +58,11 @@ const STEPS: Step[] = [
   { key: 'done',               number: 12, title: 'Git Checkpoint',            icon: '✅', auto: true  },
 ];
 
-const DISPLAY_STEPS = STEPS.filter(s => s.key !== 'done'); // sidebar shows 12 distinct steps
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
+const DISPLAY_STEPS = STEPS.filter(s => s.key !== 'done');
 
 const LANG_COLOR: Record<string, string> = {
   python: '#3b82f6', java: '#f59e0b', javascript: '#eab308',
-  typescript: '#06b6d4', csharp: '#a855f7', go: '#22d3ee',
+  typescript: '#06b6d4', csharp: '#a855f7', go: '#22d3ee', dotnet: '#a855f7',
 };
 
 const CATEGORY_COLOR: Record<string, string> = {
@@ -96,22 +91,12 @@ function Spinner({ size = 20 }: { size?: number }) {
   return <span className="spinner" style={{ width: size, height: size, display: 'inline-block' }} />;
 }
 
-function AutoProceedBar({ seconds, onDone }: { seconds: number; onDone: () => void }) {
-  const [remaining, setRemaining] = useState(seconds);
-  useEffect(() => {
-    if (remaining <= 0) { onDone(); return; }
-    const t = setTimeout(() => setRemaining(r => r - 1), 1000);
-    return () => clearTimeout(t);
-  }, [remaining, onDone]);
-  const pct = ((seconds - remaining) / seconds) * 100;
+function InfoCard({ icon, label, value }: { icon: string; label: string; value: string }) {
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 99, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: '#6366f1', transition: 'width 0.9s linear' }} />
-      </div>
-      <p className="text-muted text-sm" style={{ marginTop: 6, textAlign: 'right' }}>
-        Continuing in {remaining}s…
-      </p>
+    <div className="card animate-fade-in" style={{ textAlign: 'center', padding: '20px 16px' }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>{value}</div>
+      <div className="text-muted text-sm">{label}</div>
     </div>
   );
 }
@@ -122,8 +107,8 @@ function DiscoveryStep({ profile, onContinue }: { profile: TechnologyProfile | n
   if (!profile) return <div style={{ textAlign: 'center', padding: 60 }}><Spinner size={40} /><p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Analysing application stack…</p></div>;
 
   return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 28 }}>
+    <div className="animate-fade-up">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16, marginBottom: 28 }}>
         <InfoCard icon="🗣️" label="Languages" value={profile.languages.length.toString()} />
         <InfoCard icon="🏗️" label="Frameworks" value={profile.frameworks.length.toString()} />
         <InfoCard icon="🔨" label="Build Systems" value={profile.build_systems.length.toString()} />
@@ -131,13 +116,17 @@ function DiscoveryStep({ profile, onContinue }: { profile: TechnologyProfile | n
       </div>
 
       <div className="card" style={{ marginBottom: 20 }}>
-        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>DETECTED LANGUAGES</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>DETECTED LANGUAGES</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {profile.languages.map(l => (
-            <div key={l.name} style={{ padding: '8px 16px', borderRadius: 8, background: (LANG_COLOR[l.name.toLowerCase()] || '#6366f1') + '22', border: `1px solid ${LANG_COLOR[l.name.toLowerCase()] || '#6366f1'}44` }}>
-              <span style={{ fontWeight: 600 }}>{l.name}</span>
-              {l.version && <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 13 }}>{l.version}</span>}
-              <div style={{ marginTop: 4, height: 3, borderRadius: 99, background: (LANG_COLOR[l.name.toLowerCase()] || '#6366f1'), width: `${l.confidence * 100}%` }} />
+            <div key={l.name} style={{ padding: '12px 16px', borderRadius: 8, background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+              <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{l.name}</span>
+                {l.version && <Badge text={l.version} color={LANG_COLOR[l.name.toLowerCase()] || '#6366f1'} />}
+              </div>
+              <div className="confidence-bar">
+                <div className="confidence-fill" style={{ width: `${l.confidence * 100}%`, background: LANG_COLOR[l.name.toLowerCase()] || '#6366f1' }} />
+              </div>
             </div>
           ))}
           {profile.languages.length === 0 && <p className="text-muted">No languages detected</p>}
@@ -146,13 +135,13 @@ function DiscoveryStep({ profile, onContinue }: { profile: TechnologyProfile | n
 
       {profile.frameworks.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
-          <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>DETECTED FRAMEWORKS</h3>
+          <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>DETECTED FRAMEWORKS</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
             {profile.frameworks.map(f => (
-              <div key={f.name} style={{ padding: '8px 16px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div key={f.name} style={{ padding: '8px 16px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
                 <span style={{ fontWeight: 600 }}>{f.name}</span>
-                {f.version && <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 13 }}>v{f.version}</span>}
-                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>{f.language}</span>
+                {f.version && <span style={{ marginLeft: 8, color: 'var(--color-text-muted)', fontSize: 13 }}>v{f.version}</span>}
+                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-text-muted)' }}>({f.language})</span>
               </div>
             ))}
           </div>
@@ -168,16 +157,6 @@ function DiscoveryStep({ profile, onContinue }: { profile: TechnologyProfile | n
   );
 }
 
-function InfoCard({ icon, label, value }: { icon: string; label: string; value: string }) {
-  return (
-    <div className="card" style={{ textAlign: 'center', padding: '20px 16px' }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>{icon}</div>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>{value}</div>
-      <div className="text-muted text-sm">{label}</div>
-    </div>
-  );
-}
-
 function ProfileStep({ profile, onContinue }: { profile: TechnologyProfile | null; onContinue: () => void }) {
   if (!profile) return null;
   const complexity = profile.languages.length + profile.frameworks.length * 1.5 + profile.build_systems.length;
@@ -185,12 +164,12 @@ function ProfileStep({ profile, onContinue }: { profile: TechnologyProfile | nul
   const complexityColor = complexity < 3 ? '#10b981' : complexity < 7 ? '#f59e0b' : '#ef4444';
 
   return (
-    <div>
+    <div className="animate-fade-up">
       <div className="card" style={{ marginBottom: 20, padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Project Technology Profile</h2>
-            <p className="text-muted text-sm">{profile.workspace_path}</p>
+            <p className="text-muted text-sm" style={{ fontFamily: 'monospace' }}>{profile.workspace_path}</p>
           </div>
           <Badge text={complexityLabel} color={complexityColor} />
         </div>
@@ -229,7 +208,7 @@ function DepDetectionStep({ depResult, onContinue }: { depResult: DependencyAnal
     return <div style={{ textAlign: 'center', padding: 60 }}><Spinner size={40} /><p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Scanning dependency files…</p></div>;
   }
   return (
-    <div>
+    <div className="animate-fade-up">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
         <InfoCard icon="📦" label="Files Found" value={depResult.dependency_files.length.toString()} />
         <InfoCard icon="🔗" label="Dependencies" value={depResult.dependencies.length.toString()} />
@@ -237,11 +216,11 @@ function DepDetectionStep({ depResult, onContinue }: { depResult: DependencyAnal
         <InfoCard icon="⚡" label="Ecosystems" value={[...new Set(depResult.dependency_files.map(f => f.ecosystem))].length.toString()} />
       </div>
       <div className="card">
-        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>DETECTED DEPENDENCY FILES</h3>
+        <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>DETECTED DEPENDENCY FILES</h3>
         {depResult.dependency_files.map(f => (
-          <div key={f.path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div key={f.path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 18 }}>{f.ecosystem === 'python' ? '🐍' : f.ecosystem === 'node' ? '📦' : f.ecosystem === 'java' ? '☕' : '🔧'}</span>
+              <span style={{ fontSize: 18 }}>{f.ecosystem === 'python' ? '🐍' : f.ecosystem === 'node' ? '📦' : f.ecosystem === 'java' ? '☕' : f.ecosystem === 'dotnet' ? '🔷' : '🔧'}</span>
               <span style={{ fontFamily: 'monospace', fontSize: 13 }}>{f.path}</span>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -272,28 +251,28 @@ function VersionDetectionStep({ depResult, onContinue }: { depResult: Dependency
   };
 
   return (
-    <div>
+    <div className="animate-fade-up">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
         <InfoCard icon="✓" label="Up to date" value={depResult.up_to_date.length.toString()} />
         <InfoCard icon="↑" label="Update available" value={depResult.outdated.length.toString()} />
         <InfoCard icon="⛔" label="Blocked" value={depResult.constraint_blocked.length.toString()} />
       </div>
       <div className="card">
-        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>ALL DEPENDENCIES ({depResult.dependencies.length})</h3>
+        <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>ALL DEPENDENCIES ({depResult.dependencies.length})</h3>
         <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-          {depResult.dependencies.slice(0, 30).map(d => {
-            const cfg = statusConfig[d.status] || statusConfig.LOOKUP_FAILED;
+          {depResult.dependencies.slice(0, 50).map(d => {
+            const cfg = statusConfig[d.status as keyof typeof statusConfig] || statusConfig.LOOKUP_FAILED;
             return (
-              <div key={`${d.name}-${d.source_file}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13 }}>
+              <div key={`${d.name}-${d.source_file}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.04)', fontSize: 13 }}>
                 <span style={{ color: cfg.color, width: 16, textAlign: 'center', fontWeight: 700 }}>{cfg.icon}</span>
                 <span style={{ flex: 1, fontFamily: 'monospace' }}>{d.name}</span>
-                <span style={{ color: 'var(--text-muted)', width: 90, textAlign: 'right', fontFamily: 'monospace' }}>{d.current_version || 'unconstrained'}</span>
-                <span style={{ color: 'var(--text-muted)' }}>→</span>
-                <span style={{ color: d.status === 'UPDATE_AVAILABLE' ? '#6366f1' : 'var(--text-muted)', width: 90, fontFamily: 'monospace' }}>{d.latest_stable_version || '—'}</span>
+                <span style={{ color: 'var(--color-text-muted)', width: 90, textAlign: 'right', fontFamily: 'monospace' }}>{d.current_version || 'unconstrained'}</span>
+                <span style={{ color: 'var(--color-text-muted)' }}>→</span>
+                <span style={{ color: d.status === 'UPDATE_AVAILABLE' ? '#6366f1' : 'var(--color-text-muted)', width: 90, fontFamily: 'monospace' }}>{d.latest_stable_version || '—'}</span>
               </div>
             );
           })}
-          {depResult.dependencies.length > 30 && <p className="text-muted text-sm" style={{ marginTop: 8 }}>…and {depResult.dependencies.length - 30} more</p>}
+          {depResult.dependencies.length > 50 && <p className="text-muted text-sm" style={{ marginTop: 8 }}>…and {depResult.dependencies.length - 50} more</p>}
         </div>
       </div>
       <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
@@ -319,7 +298,7 @@ function DepReviewStep({
   onSkip: () => void;
 }) {
   if (!depResult) return null;
-  const updates = depResult.proposed_updates;
+  const updates = depResult.proposed_updates || [];
 
   const toggle = (key: string) => {
     const next = new Set(approvedIds);
@@ -334,7 +313,7 @@ function DepReviewStep({
   };
 
   return (
-    <div>
+    <div className="animate-fade-up">
       {updates.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
@@ -360,17 +339,17 @@ function DepReviewStep({
               const key = u.dependency_name + u.source_file;
               const checked = approvedIds.has(key);
               return (
-                <div key={key} onClick={() => toggle(key)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', cursor: 'pointer', transition: 'opacity 0.15s' }}>
-                  <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? '#6366f1' : 'rgba(255,255,255,0.2)'}`, background: checked ? '#6366f1' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div key={key} onClick={() => toggle(key)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer', transition: 'opacity 0.15s' }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--color-accent)' : 'rgba(0,0,0,0.2)'}`, background: checked ? 'var(--color-accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     {checked && <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>✓</span>}
                   </div>
                   <div style={{ flex: 1 }}>
                     <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{u.dependency_name}</span>
                     <span className="text-muted text-sm" style={{ marginLeft: 10 }}>{u.source_file}</span>
                   </div>
-                  <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: 13 }}>{u.current_version || 'unconstrained'}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>→</span>
-                  <span style={{ color: '#6366f1', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>{u.proposed_version}</span>
+                  <span style={{ color: 'var(--color-text-muted)', fontFamily: 'monospace', fontSize: 13 }}>{u.current_version || 'unconstrained'}</span>
+                  <span style={{ color: 'var(--color-text-muted)' }}>→</span>
+                  <span style={{ color: 'var(--color-accent)', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>{u.proposed_version}</span>
                 </div>
               );
             })}
@@ -392,7 +371,7 @@ function DepApplyingStep({ applyResult, onContinue }: { applyResult: DependencyA
     return <div style={{ textAlign: 'center', padding: 60 }}><Spinner size={40} /><p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Applying dependency updates…</p></div>;
   }
   return (
-    <div>
+    <div className="animate-fade-up">
       <div className="card" style={{ marginBottom: 20, padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           <div style={{ fontSize: 40 }}>{applyResult.validation_status === 'PASSED' ? '✅' : '⚠️'}</div>
@@ -403,9 +382,9 @@ function DepApplyingStep({ applyResult, onContinue }: { applyResult: DependencyA
         </div>
         {applyResult.changed_files.length > 0 && (
           <div>
-            <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>CHANGED FILES</h4>
+            <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 12 }}>CHANGED FILES</h4>
             {applyResult.changed_files.map(f => (
-              <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', fontFamily: 'monospace', fontSize: 13 }}>
+              <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontFamily: 'monospace', fontSize: 13 }}>
                 <span style={{ color: '#10b981' }}>✓</span> {f}
               </div>
             ))}
@@ -442,14 +421,14 @@ function AIRecommendingStep({ recommendations, onContinue }: { recommendations: 
   const others = recommendations.filter(r => !r.recommended).slice(0, 5);
 
   return (
-    <div>
+    <div className="animate-fade-up">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
         <InfoCard icon="🏆" label="Recommended" value={recommended.length.toString()} />
         <InfoCard icon="📋" label="Available" value={recommendations.length.toString()} />
         <InfoCard icon="🔐" label="Security" value={recommendations.filter(r => r.category === 'security').length.toString()} />
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: '#6366f1' }}>⭐ TOP RECOMMENDATIONS</h3>
+        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 700, color: 'var(--color-accent)' }}>⭐ TOP RECOMMENDATIONS</h3>
         {recommended.slice(0, 8).map(r => (
           <RecipeRow key={r.id} recipe={r} highlighted />
         ))}
@@ -457,7 +436,7 @@ function AIRecommendingStep({ recommendations, onContinue }: { recommendations: 
       </div>
       {others.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
-          <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>OTHER APPLICABLE RECIPES</h3>
+          <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--color-text-muted)' }}>OTHER APPLICABLE RECIPES</h3>
           {others.map(r => <RecipeRow key={r.id} recipe={r} />)}
         </div>
       )}
@@ -476,22 +455,22 @@ function RecipeRow({ recipe, highlighted = false, selected, onToggle }: { recipe
       onClick={onToggle}
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 14,
-        padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.06)',
+        padding: '12px 0', borderBottom: '1px solid rgba(0,0,0,0.06)',
         cursor: onToggle ? 'pointer' : 'default',
         opacity: 1,
       }}
     >
       {onToggle && (
-        <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${selected ? '#6366f1' : 'rgba(255,255,255,0.2)'}`, background: selected ? '#6366f1' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
+        <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${selected ? 'var(--color-accent)' : 'rgba(0,0,0,0.2)'}`, background: selected ? 'var(--color-accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
           {selected && <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>✓</span>}
         </div>
       )}
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{recipe.name}</span>
-          {highlighted && recipe.recommended && <Badge text="recommended" color="#6366f1" />}
-          <Badge text={recipe.category} color={CATEGORY_COLOR[recipe.category] || '#6366f1'} />
-          <Badge text={recipe.complexity} color={COMPLEXITY_COLOR[recipe.complexity] || '#6366f1'} />
+          {highlighted && recipe.recommended && <Badge text="recommended" color="var(--color-accent)" />}
+          <Badge text={recipe.category} color={CATEGORY_COLOR[recipe.category as keyof typeof CATEGORY_COLOR] || '#6366f1'} />
+          <Badge text={recipe.complexity} color={COMPLEXITY_COLOR[recipe.complexity as keyof typeof COMPLEXITY_COLOR] || '#6366f1'} />
         </div>
         <p className="text-muted text-sm" style={{ lineHeight: 1.5 }}>{recipe.description}</p>
         {recipe.requires.length > 0 && <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>Requires: {recipe.requires.join(', ')}</p>}
@@ -511,13 +490,13 @@ function RecipeSelectionStep({
   setSelectedIds: (s: Set<string>) => void;
   onContinue: () => void;
 }) {
+  const [filterText, setFilterText] = useState('');
   const toggle = (id: string) => {
     const next = new Set(selectedIds);
     next.has(id) ? next.delete(id) : next.add(id);
     setSelectedIds(next);
   };
 
-  // Auto-add recommended recipes on mount
   useEffect(() => {
     const recs = recommendations.filter(r => r.recommended).map(r => r.id);
     if (recs.length > 0 && selectedIds.size === 0) {
@@ -525,7 +504,13 @@ function RecipeSelectionStep({
     }
   }, [recommendations]);
 
-  const grouped = recommendations.reduce<Record<string, Recipe[]>>((acc, r) => {
+  const filtered = recommendations.filter(r =>
+    r.name.toLowerCase().includes(filterText.toLowerCase()) ||
+    r.description.toLowerCase().includes(filterText.toLowerCase()) ||
+    r.language.toLowerCase().includes(filterText.toLowerCase())
+  );
+
+  const grouped = filtered.reduce<Record<string, Recipe[]>>((acc, r) => {
     const key = r.language === 'all' ? 'General' : r.language.charAt(0).toUpperCase() + r.language.slice(1);
     if (!acc[key]) acc[key] = [];
     acc[key].push(r);
@@ -544,11 +529,11 @@ function RecipeSelectionStep({
   const allSelected = recommendations.length > 0 && recommendations.every(r => selectedIds.has(r.id));
 
   return (
-    <div>
+    <div className="animate-fade-up">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
           <h3 style={{ marginBottom: 4 }}>Select Migration Recipes</h3>
-          <p className="text-muted text-sm">{selectedIds.size} recipe{selectedIds.size !== 1 ? 's' : ''} selected. Recommended ones are pre-selected.</p>
+          <p className="text-muted text-sm">{selectedIds.size} recipe{selectedIds.size !== 1 ? 's' : ''} selected.</p>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={toggleAll}>
@@ -560,14 +545,24 @@ function RecipeSelectionStep({
         </div>
       </div>
 
+      <div style={{ marginBottom: 20 }}>
+        <input
+          className="input"
+          placeholder="Filter recipes by name, description, or language..."
+          value={filterText}
+          onChange={e => setFilterText(e.target.value)}
+        />
+      </div>
+
       {Object.entries(grouped).map(([group, recipes]) => (
         <div key={group} className="card" style={{ marginBottom: 16 }}>
-          <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>{group.toUpperCase()} ({recipes.length})</h3>
+          <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>{group.toUpperCase()} ({recipes.length})</h3>
           {recipes.map(r => (
             <RecipeRow key={r.id} recipe={r} selected={selectedIds.has(r.id)} onToggle={() => toggle(r.id)} />
           ))}
         </div>
       ))}
+      {filtered.length === 0 && <p className="text-muted text-center" style={{ padding: 24 }}>No recipes match your filter.</p>}
     </div>
   );
 }
@@ -577,31 +572,31 @@ function RecipeAnalyzingStep({ analysis, onContinue }: { analysis: RecipeAnalysi
     return <div style={{ textAlign: 'center', padding: 60 }}><Spinner size={40} /><p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Analysing recipe dependencies and ordering…</p></div>;
   }
   return (
-    <div>
+    <div className="animate-fade-up">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-        <InfoCard icon="📦" label="Recipes" value={analysis.ordered_recipes.length.toString()} />
+        <InfoCard icon="🍳" label="Recipes" value={analysis.ordered_recipes.length.toString()} />
         <InfoCard icon="🔀" label="Phases" value={analysis.execution_phases.length.toString()} />
         <InfoCard icon="⚡" label="Conflicts" value={analysis.conflicts.length.toString()} />
       </div>
 
       {analysis.auto_added_recipes.length > 0 && (
-        <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', marginBottom: 20 }}>
-          <p style={{ fontSize: 13, color: '#a5b4fc' }}>
+        <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(29,127,138,0.1)', border: '1px solid rgba(29,127,138,0.3)', marginBottom: 20 }}>
+          <p style={{ fontSize: 13, color: 'var(--color-accent)' }}>
             <strong>Auto-added required recipes:</strong> {analysis.auto_added_recipes.map(r => r.name).join(', ')}
           </p>
         </div>
       )}
 
       <div className="card" style={{ marginBottom: 20 }}>
-        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>EXECUTION ORDER</h3>
+        <h3 style={{ marginBottom: 16, fontSize: 14, fontWeight: 600, color: 'var(--color-accent-2)' }}>EXECUTION ORDER</h3>
         {analysis.execution_phases.map(phase => (
           <div key={phase.phase} style={{ marginBottom: 16 }}>
-            <h4 style={{ fontSize: 12, color: '#6366f1', marginBottom: 8, textTransform: 'uppercase' }}>Phase {phase.phase}</h4>
+            <h4 style={{ fontSize: 12, color: 'var(--color-accent)', marginBottom: 8, textTransform: 'uppercase' }}>Phase {phase.phase}</h4>
             {phase.recipes.map(r => (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13 }}>
-                <span style={{ color: '#6366f1', fontSize: 10 }}>●</span>
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.04)', fontSize: 13 }}>
+                <span style={{ color: 'var(--color-accent)', fontSize: 10 }}>●</span>
                 <span style={{ fontWeight: 600 }}>{r.name}</span>
-                <Badge text={r.category} color={CATEGORY_COLOR[r.category] || '#6366f1'} />
+                <Badge text={r.category} color={CATEGORY_COLOR[r.category as keyof typeof CATEGORY_COLOR] || '#6366f1'} />
               </div>
             ))}
           </div>
@@ -630,7 +625,7 @@ function ConflictResolutionStep({
 
   if (!analysis.has_conflicts) {
     return (
-      <div>
+      <div className="animate-fade-up">
         <div className="card" style={{ textAlign: 'center', padding: 48, marginBottom: 20 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
           <h3 style={{ marginBottom: 8 }}>No Conflicts Detected</h3>
@@ -646,22 +641,23 @@ function ConflictResolutionStep({
   }
 
   return (
-    <div>
-      <div style={{ padding: '12px 16px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, marginBottom: 20 }}>
-        <p style={{ color: '#fca5a5', fontWeight: 600 }}>{analysis.conflicts.length} conflict{analysis.conflicts.length !== 1 ? 's' : ''} detected in recipe selection</p>
+    <div className="animate-fade-up">
+      <div className="alert alert-warning" style={{ marginBottom: 20 }}>
+        <span>⚠️</span>
+        <div style={{ fontWeight: 600 }}>{analysis.conflicts.length} conflict{analysis.conflicts.length !== 1 ? 's' : ''} detected in recipe selection</div>
       </div>
 
       <div className="card" style={{ marginBottom: 20 }}>
         {analysis.conflicts.map((c, i) => (
-          <div key={i} style={{ padding: '16px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div key={i} style={{ padding: '16px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <Badge text={c.severity} color={c.severity === 'ERROR' ? '#ef4444' : '#f59e0b'} />
               <span style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: 13 }}>{c.recipe_a}</span>
-              <span style={{ color: 'var(--text-muted)' }}>↔</span>
+              <span style={{ color: 'var(--color-text-muted)' }}>↔</span>
               <span style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: 13 }}>{c.recipe_b}</span>
             </div>
             <p className="text-muted text-sm" style={{ marginBottom: 6 }}>{c.reason}</p>
-            <p style={{ fontSize: 13, color: '#a5b4fc' }}>Resolution: {c.resolution}</p>
+            <p style={{ fontSize: 13, color: 'var(--color-accent)' }}>Resolution: {c.resolution}</p>
           </div>
         ))}
       </div>
@@ -679,14 +675,14 @@ function PlanStep({ plan, onContinue }: { plan: MigrationPlan | null; onContinue
     return <div style={{ textAlign: 'center', padding: 60 }}><Spinner size={40} /><p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Generating migration plan…</p></div>;
   }
   return (
-    <div>
+    <div className="animate-fade-up">
       <div className="card" style={{ marginBottom: 20, padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
           <div>
             <h2 style={{ marginBottom: 4 }}>Migration Plan</h2>
             <p className="text-muted text-sm">{plan.summary}</p>
           </div>
-          <Badge text={`${plan.risk_level} RISK`} color={RISK_COLOR[plan.risk_level] || '#6366f1'} />
+          <Badge text={`${plan.risk_level} RISK`} color={RISK_COLOR[plan.risk_level as keyof typeof RISK_COLOR] || '#6366f1'} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
@@ -696,17 +692,17 @@ function PlanStep({ plan, onContinue }: { plan: MigrationPlan | null; onContinue
           <InfoCard icon="📁" label="Est. Files" value={`~${plan.estimated_files_changed}`} />
         </div>
 
-        <div style={{ padding: 16, background: 'rgba(99,102,241,0.08)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)', marginBottom: 20 }}>
-          <h4 style={{ fontSize: 12, color: '#6366f1', marginBottom: 8, textTransform: 'uppercase' }}>Git Checkpoint Message</h4>
-          <code style={{ fontSize: 13, color: '#a5b4fc' }}>{plan.git_checkpoint_message}</code>
+        <div style={{ padding: 16, background: 'rgba(29,127,138,0.06)', borderRadius: 8, border: '1px solid rgba(29,127,138,0.2)', marginBottom: 20 }}>
+          <h4 style={{ fontSize: 12, color: 'var(--color-accent)', marginBottom: 8, textTransform: 'uppercase' }}>Git Checkpoint Message</h4>
+          <code style={{ fontSize: 13, color: 'var(--color-accent-2)' }}>{plan.git_checkpoint_message}</code>
         </div>
 
         {plan.phases.map(phase => (
           <div key={phase.phase} style={{ marginBottom: 16 }}>
-            <h4 style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 10 }}>Phase {phase.phase}</h4>
+            <h4 style={{ fontSize: 12, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 10 }}>Phase {phase.phase}</h4>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {phase.recipes.map(r => (
-                <div key={r.id} style={{ padding: '6px 14px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', fontSize: 13 }}>
+                <div key={r.id} style={{ padding: '6px 14px', borderRadius: 6, background: 'rgba(0,0,0,0.03)', border: '1px solid var(--color-border)', fontSize: 13 }}>
                   {r.name}
                 </div>
               ))}
@@ -746,7 +742,7 @@ function CheckpointStep({
 
   if (error) {
     return (
-      <div className="card" style={{ padding: 24 }}>
+      <div className="card animate-fade-up" style={{ padding: 24 }}>
         <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
         <h3 style={{ marginBottom: 8, color: '#fca5a5' }}>Checkpoint Failed</h3>
         <p style={{ color: '#fca5a5', fontFamily: 'monospace', fontSize: 13 }}>{error}</p>
@@ -756,7 +752,7 @@ function CheckpointStep({
 
   if (result!.status === 'nothing_to_commit') {
     return (
-      <div className="card" style={{ padding: 24, textAlign: 'center' }}>
+      <div className="card animate-fade-up" style={{ padding: 24, textAlign: 'center' }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
         <h3 style={{ marginBottom: 8 }}>Working Tree is Clean</h3>
         <p className="text-muted">No changes to commit — checkpoint acknowledged.</p>
@@ -771,9 +767,8 @@ function CheckpointStep({
   }
 
   return (
-    <div>
-      {/* Success banner */}
-      <div style={{ padding: 24, borderRadius: 12, background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(16,185,129,0.1))', border: '1px solid rgba(99,102,241,0.3)', marginBottom: 24, textAlign: 'center' }}>
+    <div className="animate-fade-up">
+      <div style={{ padding: 24, borderRadius: 12, background: 'linear-gradient(135deg, rgba(29,127,138,0.15), rgba(16,185,129,0.1))', border: '1px solid rgba(29,127,138,0.25)', marginBottom: 24, textAlign: 'center' }}>
         <div style={{ fontSize: 56, marginBottom: 12 }}>🎯</div>
         <h2 style={{ marginBottom: 8, fontSize: 22 }}>Git Checkpoint Created</h2>
         <p className="text-muted">Pre-migration checkpoint successfully committed to version control.</p>
@@ -782,40 +777,40 @@ function CheckpointStep({
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
           <div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Commit Hash</p>
-            <code style={{ fontSize: 18, fontWeight: 700, color: '#6366f1' }}>{result!.commit_hash}</code>
+            <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Commit Hash</p>
+            <code style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-accent)' }}>{result!.commit_hash}</code>
           </div>
           <div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Branch</p>
+            <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Branch</p>
             <code style={{ fontSize: 18, fontWeight: 700 }}>{result!.branch}</code>
           </div>
           <div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Files Committed</p>
+            <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Files Committed</p>
             <span style={{ fontSize: 18, fontWeight: 700 }}>{result!.files_committed}</span>
           </div>
           <div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Timestamp</p>
+            <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Timestamp</p>
             <span style={{ fontSize: 14 }}>{new Date(result!.timestamp).toLocaleString()}</span>
           </div>
         </div>
 
         {result!.commit_message && (
-          <div style={{ marginTop: 20, padding: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 8 }}>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>COMMIT MESSAGE</p>
-            <code style={{ fontSize: 13, color: '#a5b4fc' }}>{result!.commit_message}</code>
+          <div style={{ marginTop: 20, padding: 12, background: 'rgba(0,0,0,0.03)', borderRadius: 8 }}>
+            <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>COMMIT MESSAGE</p>
+            <code style={{ fontSize: 13, color: 'var(--color-accent-2)' }}>{result!.commit_message}</code>
           </div>
         )}
 
         {result!.stats && (
           <div style={{ marginTop: 16, display: 'flex', gap: 20 }}>
-            <div><span style={{ color: '#10b981' }}>+{result!.stats.insertions}</span> <span className="text-muted text-sm">insertions</span></div>
-            <div><span style={{ color: '#ef4444' }}>-{result!.stats.deletions}</span> <span className="text-muted text-sm">deletions</span></div>
-            <div><span>{result!.stats.files}</span> <span className="text-muted text-sm">files</span></div>
+            <div><span style={{ color: '#10b981', fontWeight: 600 }}>+{result!.stats.insertions}</span> <span className="text-muted text-sm">insertions</span></div>
+            <div><span style={{ color: '#ef4444', fontWeight: 600 }}>-{result!.stats.deletions}</span> <span className="text-muted text-sm">deletions</span></div>
+            <div><span style={{ fontWeight: 600 }}>{result!.stats.files}</span> <span className="text-muted text-sm">files</span></div>
           </div>
         )}
 
         {result!.is_new_repo && (
-          <div style={{ marginTop: 16, padding: '8px 12px', background: 'rgba(99,102,241,0.1)', borderRadius: 6, fontSize: 13, color: '#a5b4fc' }}>
+          <div style={{ marginTop: 16, padding: '8px 12px', background: 'rgba(29,127,138,0.08)', borderRadius: 6, fontSize: 13, color: 'var(--color-accent)' }}>
             ℹ️ A new git repository was initialized in the workspace.
           </div>
         )}
@@ -847,7 +842,6 @@ export default function Pipeline() {
 
   const workspacePath = searchParams.get('wp') || '';
 
-  // ── State ──────────────────────────────────────────────────────────────────
   const [stage, setStage] = useState<StageKey>('discovery');
   const [profile, setProfile] = useState<TechnologyProfile | null>(null);
   const [depResult, setDepResult] = useState<DependencyAnalysisResult | null>(null);
@@ -862,7 +856,6 @@ export default function Pipeline() {
   const [error, setError] = useState<string | null>(null);
   const hasRun = useRef(false);
 
-  // ── Auto-run discovery on mount ────────────────────────────────────────────
   useEffect(() => {
     if (hasRun.current || !projectId || !workspacePath) return;
     hasRun.current = true;
@@ -870,7 +863,6 @@ export default function Pipeline() {
     analyzeRepo(workspacePath, projectId)
       .then(res => {
         const data = res.data;
-        // Extract from nested profile object
         const p = data.profile || {};
         const profileData: TechnologyProfile = {
           profile_id: p.profile_id || projectId,
@@ -885,30 +877,25 @@ export default function Pipeline() {
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Analysis failed.'));
   }, [projectId, workspacePath]);
 
-  // ── Stage transitions ──────────────────────────────────────────────────────
   const go = useCallback((next: StageKey) => setStage(next), []);
 
-  // Run dep analysis (plan_only) when entering dep-detection
   useEffect(() => {
     if (stage !== 'dep-detection' || depResult !== null || !workspacePath || !projectId) return;
     planDependencyAnalysis(workspacePath, projectId)
       .then(res => {
         setDepResult(res.data);
-        // Auto-approve all updates by default
         const allIds = new Set<string>((res.data.proposed_updates || []).map((u: any) => u.dependency_name + u.source_file));
         setApprovedDepIds(allIds);
       })
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Dependency detection failed.'));
   }, [stage]);
 
-  // Apply dep updates when entering dep-applying
   useEffect(() => {
     if (stage !== 'dep-applying' || applyResult !== null || !workspacePath || !projectId) return;
 
-    // If no approved updates, skip applying and go straight to AI step
     const depUpdates = depResult?.proposed_updates || [];
     if (depUpdates.length === 0 || approvedDepIds.size === 0) {
-      setApplyResult(depResult!);  // use plan result as-is
+      setApplyResult(depResult!);
       return;
     }
 
@@ -917,7 +904,6 @@ export default function Pipeline() {
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Apply failed.'));
   }, [stage]);
 
-  // Run AI recommendations when entering ai-recommending
   useEffect(() => {
     if (stage !== 'ai-recommending' || recommendations !== null || !workspacePath || !projectId || !profile) return;
 
@@ -938,7 +924,6 @@ export default function Pipeline() {
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Recommendation failed.'));
   }, [stage]);
 
-  // Run recipe conflict analysis when entering recipe-analyzing
   useEffect(() => {
     if (stage !== 'recipe-analyzing' || recipeAnalysis !== null || selectedRecipeIds.size === 0) return;
 
@@ -947,7 +932,6 @@ export default function Pipeline() {
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Recipe analysis failed.'));
   }, [stage]);
 
-  // Generate migration plan when entering plan
   useEffect(() => {
     if (stage !== 'plan' || plan !== null || !workspacePath || !projectId) return;
 
@@ -965,7 +949,6 @@ export default function Pipeline() {
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Plan generation failed.'));
   }, [stage]);
 
-  // Create git checkpoint when entering checkpointing
   useEffect(() => {
     if (stage !== 'checkpointing' || checkpointResult !== null || checkpointError !== null || !workspacePath || !projectId) return;
 
@@ -983,7 +966,6 @@ export default function Pipeline() {
       });
   }, [stage]);
 
-  // ── Compute step number for sidebar ───────────────────────────────────────
   const stageOrder: StageKey[] = [
     'discovery', 'profile', 'dep-detection', 'version-detection', 'dep-review',
     'dep-applying', 'ai-recommending', 'recipe-selection', 'recipe-analyzing',
@@ -1014,7 +996,6 @@ export default function Pipeline() {
     return 'upcoming';
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   const currentStep = STEPS.find(s => s.key === stage) || STEPS[0];
 
   const renderContent = () => {
@@ -1091,7 +1072,7 @@ export default function Pipeline() {
 
   return (
     <div style={{ display: 'flex', gap: 0, minHeight: 'calc(100vh - 48px)', position: 'relative', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
-      {/* ── Sidebar ── */}
+      {/* Sidebar */}
       <div style={{
         width: 260, flexShrink: 0,
         borderRight: '1px solid var(--color-border)',
@@ -1100,9 +1081,9 @@ export default function Pipeline() {
         position: 'sticky', top: 0, height: 'calc(100vh - 48px)', overflowY: 'auto',
       }}>
         <div style={{ padding: '0 20px 16px', borderBottom: '1px solid var(--color-border)', marginBottom: 8 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Migration Pipeline</p>
-          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {projectId?.slice(0, 12)}…
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Migration Pipeline</p>
+          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+            {projectId}
           </p>
         </div>
 
@@ -1138,13 +1119,13 @@ export default function Pipeline() {
         })}
       </div>
 
-      {/* ── Main content ── */}
+      {/* Main Content Area */}
       <div style={{ flex: 1, padding: '32px 36px', overflowY: 'auto', maxWidth: 900 }}>
-        {/* Step header */}
+        {/* Step Header */}
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
             <div style={{
-              width: 36, height: 36, borderRadius: 10, background: 'rgba(29, 127, 138, 0.15)',
+              width: 36, height: 36, borderRadius: 10, background: 'rgba(29, 127, 138, 0.12)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
             }}>{currentStep.icon}</div>
             <div>
@@ -1154,14 +1135,8 @@ export default function Pipeline() {
               <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{currentStep.title}</h1>
             </div>
           </div>
-          {/* Progress bar */}
-          <div style={{ height: 3, background: 'var(--color-border)', borderRadius: 99, overflow: 'hidden', marginTop: 16 }}>
-            <div style={{
-              height: '100%',
-              width: `${(Math.min(currentStep.number, 12) / 12) * 100}%`,
-              background: 'var(--color-accent)',
-              transition: 'width 0.4s ease',
-            }} />
+          <div className="progress-bar" style={{ marginTop: 16 }}>
+            <div className="progress-fill" style={{ width: `${(Math.min(currentStep.number, 12) / 12) * 100}%` }} />
           </div>
         </div>
 

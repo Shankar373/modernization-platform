@@ -18,9 +18,9 @@ const queryClient = new QueryClient();
 const NAV = [
   { to: '/', label: '⬡ Dashboard', exact: true },
   { to: '/new', label: '＋ New Migration' },
+  { to: '/dependencies', label: '📦 Dependencies' },
   { to: '/history', label: '⟳ History' },
 ];
-
 
 export default function App() {
   return (
