@@ -265,16 +265,53 @@ class CRUDRepository:
         run_id: str,
         commit_sha: str,
         description: str,
+        branch: Optional[str] = None,
+        repository_path: Optional[str] = None,
+        repository_status: Optional[str] = None,
+        rollback_status: str = "NOT_REQUIRED",
     ) -> DBMigrationCheckpoint:
         db_cp = DBMigrationCheckpoint(
             project_id=project_id,
             run_id=run_id,
             commit_sha=commit_sha,
             description=description,
+            branch=branch,
+            repository_path=repository_path,
+            repository_status=repository_status,
+            rollback_status=rollback_status,
         )
         db.add(db_cp)
         await db.commit()
         await db.refresh(db_cp)
+        return db_cp
+
+    @staticmethod
+    async def get_migration_checkpoints(db: AsyncSession, run_id: str) -> List[DBMigrationCheckpoint]:
+        result = await db.execute(
+            select(DBMigrationCheckpoint)
+            .filter(DBMigrationCheckpoint.run_id == run_id)
+            .order_by(DBMigrationCheckpoint.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def update_checkpoint_rollback_status(
+        db: AsyncSession,
+        checkpoint_id: str,
+        status: str,
+        error: Optional[str] = None
+    ) -> Optional[DBMigrationCheckpoint]:
+        result = await db.execute(
+            select(DBMigrationCheckpoint).filter(DBMigrationCheckpoint.checkpoint_id == checkpoint_id)
+        )
+        db_cp = result.scalars().first()
+        if db_cp:
+            db_cp.rollback_status = status
+            db_cp.rollback_timestamp = datetime.utcnow()
+            if error:
+                db_cp.rollback_error = error
+            await db.commit()
+            await db.refresh(db_cp)
         return db_cp
 
     # ── RecipeExecution ───────────────────────────────────────────────────────

@@ -440,6 +440,41 @@ async def get_migration_status(run_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/migration/{run_id}/checkpoints")
+async def get_checkpoints(run_id: str, db: AsyncSession = Depends(get_db)):
+    """Retrieve Git checkpoints created during a migration run."""
+    checkpoints = await CRUDRepository.get_migration_checkpoints(db, run_id)
+    return [
+        {
+            "checkpoint_id": cp.checkpoint_id,
+            "run_id": cp.run_id,
+            "commit_sha": cp.commit_sha,
+            "description": cp.description,
+            "branch": cp.branch,
+            "rollback_status": cp.rollback_status,
+            "rollback_timestamp": cp.rollback_timestamp.isoformat() if cp.rollback_timestamp else None,
+            "rollback_error": cp.rollback_error,
+            "created_at": cp.created_at.isoformat() if cp.created_at else None
+        }
+        for cp in checkpoints
+    ]
+
+
+@router.post("/migration/{run_id}/rollback")
+async def trigger_manual_rollback(run_id: str, db: AsyncSession = Depends(get_db)):
+    """Manually revert the repository changes back to the pre-modernization checkpoint."""
+    from app.core.git_safety import rollback_git_checkpoint
+    res = await rollback_git_checkpoint(run_id, db)
+    if res["status"] == "FAILED":
+        raise HTTPException(status_code=400, detail=res["message"])
+    elif res["status"] == "BLOCKED":
+        raise HTTPException(status_code=403, detail=res["message"])
+    return res
+
+
+
+
+
 @router.get("/migration/result/{result_id}/report")
 async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
     """Generate and return the migration report."""

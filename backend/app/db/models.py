@@ -100,6 +100,12 @@ class DBMigrationCheckpoint(Base):
     run_id = Column(String(36), ForeignKey("migration_runs.result_id", ondelete="CASCADE"), nullable=False)
     commit_sha = Column(String(100), nullable=False)
     description = Column(String(255), nullable=False)
+    branch = Column(String(100), nullable=True)
+    repository_path = Column(String(1024), nullable=True)
+    repository_status = Column(Text, nullable=True)
+    rollback_status = Column(String(50), default="NOT_REQUIRED", nullable=False)
+    rollback_timestamp = Column(DateTime, nullable=True)
+    rollback_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

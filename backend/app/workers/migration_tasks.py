@@ -135,6 +135,12 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                 await run_stage_event("RECIPE_VALIDATION", 5, "SUCCESS", "Recipe validation successful.")
 
                 # TRANSFORMATION
+                try:
+                    from app.core.git_safety import create_git_checkpoint
+                    await create_git_checkpoint(workspace_path, result_id, db_run.project_id, db)
+                except Exception as checkpoint_err:
+                    print(f"[Celery] Checkpoint creation skipped or failed: {checkpoint_err}")
+
                 await run_stage_event("TRANSFORMATION", 6, "RUNNING", "Applying code transformations...")
                 
                 # Determine if planned or full migrate-all run
@@ -219,6 +225,14 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                 # Capture run failure if not already captured
                 trace = traceback.format_exc()
                 print(f"[Celery] Run failed: {e}\n{trace}")
+                
+                # Trigger safe rollback
+                try:
+                    from app.core.git_safety import rollback_git_checkpoint
+                    await rollback_git_checkpoint(result_id, db)
+                except Exception as rollback_err:
+                    print(f"[Celery] Automatic rollback failed: {rollback_err}")
+
                 # Ensure the run is marked as FAILED in DB
                 try:
                     await CRUDRepository.update_migration_run_status(
