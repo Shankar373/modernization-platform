@@ -163,24 +163,55 @@ UniversalScanner._detect_dependencies = _enhanced_detect_dependencies
 _orig_detect_testing = UniversalScanner._detect_testing_frameworks
 def _enhanced_detect_testing(self, ws: Path, files: list[Path]):
     found = _orig_detect_testing(self, ws, files)
+    
+    # 1. Inspect C# packages.config & .csproj for test packages
+    for pkg_config in ws.rglob("packages.config"):
+        if self._is_ignored(pkg_config): continue
+        try:
+            content = pkg_config.read_text(encoding="utf-8", errors="replace").lower()
+            if "mstest" in content and "MSTest" not in found:
+                found.append("MSTest")
+            if "nunit" in content and "NUnit" not in found:
+                found.append("NUnit")
+            if "xunit" in content and "xUnit" not in found:
+                found.append("xUnit")
+        except Exception:
+            pass
+
+    for csproj in ws.rglob("*.csproj"):
+        if self._is_ignored(csproj): continue
+        try:
+            content = csproj.read_text(encoding="utf-8", errors="replace").lower()
+            if "mstest" in content and "MSTest" not in found:
+                found.append("MSTest")
+            if "nunit" in content and "NUnit" not in found:
+                found.append("NUnit")
+            if "xunit" in content and "xUnit" not in found:
+                found.append("xUnit")
+        except Exception:
+            pass
+
+    # 2. Inspect C# & multi-language source code for test annotations
     csharp_test_checks = {
-        "MSTest": ["Microsoft.VisualStudio.TestTools.UnitTesting", "MSTest", "[TestClass]", "[TestMethod]"],
-        "NUnit": ["nunit.framework", "NUnit", "[TestFixture]", "[Test]"],
-        "xUnit": ["xunit", "[Fact]", "[Theory]"],
+        "MSTest": ["microsoft.visualstudio.testtools.unittesting", "mstest", "[testclass]", "[testmethod]"],
+        "NUnit": ["nunit.framework", "nunit", "[testfixture]"],
+        "xUnit": ["xunit", "[fact]", "[theory]"],
     }
     all_text = ""
-    for f in files[:200]:
-        if f.suffix.lower() in (".cs", ".csproj", ".config"):
+    for f in files[:300]:
+        if f.suffix.lower() in (".cs", ".csproj", ".config", ".py", ".java", ".js", ".ts"):
             try:
-                all_text += f.read_text(encoding="utf-8", errors="replace")[:1000]
+                all_text += f.read_text(encoding="utf-8", errors="replace")[:2000]
             except Exception:
                 pass
     for name, markers in csharp_test_checks.items():
-        if name not in found and any(m.lower() in all_text.lower() for m in markers):
+        if name not in found and any(m in all_text.lower() for m in markers):
             found.append(name)
+
     return found
 
 UniversalScanner._detect_testing_frameworks = _enhanced_detect_testing
+
 
 
 
