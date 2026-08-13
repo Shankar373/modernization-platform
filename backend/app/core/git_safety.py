@@ -181,3 +181,84 @@ async def rollback_git_checkpoint(run_id: str, db) -> dict:
             db, checkpoint.checkpoint_id, "FAILED", f"Git reset error: {e}"
         )
         return {"status": "FAILED", "message": f"Git reset failed: {e}\n{trace}"}
+
+
+# ── Secure Command Execution (Phase 6 Isolation) ──────────────────────────────
+import subprocess
+import sys
+
+SAFE_ENV_ALLOWLIST = {
+    "PATH", "LANG", "LC_ALL", "SYSTEMROOT", "COMSPEC", "TEMP", "TMP", 
+    "PYTHONPATH", "JAVA_HOME", "M2_HOME", "MAVEN_HOME", "NODE_ENV", "USERPROFILE"
+}
+
+class SubprocessSecurityError(Exception):
+    pass
+
+def validate_workspace_path(path: str, workspace_root: str) -> str:
+    abs_root = os.path.abspath(workspace_root)
+    abs_path = os.path.abspath(path)
+    if not abs_path.startswith(abs_root):
+        raise SubprocessSecurityError(f"Path traversal attempt blocked. Path {abs_path} is outside workspace {abs_root}.")
+    real_path = os.path.realpath(abs_path)
+    real_root = os.path.realpath(abs_root)
+    if not real_path.startswith(real_root):
+        raise SubprocessSecurityError(f"Symlink boundary bypass attempt blocked. Path {real_path} is outside workspace {real_root}.")
+    return abs_path
+
+def run_secured_command(
+    args: List[str],
+    workspace_root: str,
+    cwd: Optional[str] = None,
+    timeout_seconds: int = 300,
+    additional_env: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    validate_workspace_path(workspace_root, workspace_root)
+    if cwd:
+        cwd = validate_workspace_path(cwd, workspace_root)
+    else:
+        cwd = workspace_root
+
+    sanitized_env = {}
+    for key, value in os.environ.items():
+        if key.upper() in SAFE_ENV_ALLOWLIST:
+            sanitized_env[key] = value
+
+    if additional_env:
+        for key, value in additional_env.items():
+            if key.upper() in SAFE_ENV_ALLOWLIST or not any(sec in key.lower() for sec in ["pass", "secret", "key", "token", "cred"]):
+                sanitized_env[key] = value
+
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=cwd,
+            env=sanitized_env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            shell=(sys.platform == "win32" and args[0].endswith(".bat"))
+        )
+        return {
+            "exit_code": proc.returncode,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "timeout_triggered": False
+        }
+    except subprocess.TimeoutExpired as e:
+        return {
+            "exit_code": -1,
+            "stdout": e.stdout if isinstance(e.stdout, str) else "",
+            "stderr": e.stderr if isinstance(e.stderr, str) else "",
+            "timeout_triggered": True,
+            "error_message": f"Command timed out after {timeout_seconds} seconds."
+        }
+    except Exception as e:
+        return {
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": str(e),
+            "timeout_triggered": False,
+            "error_message": f"Subprocess execution error: {e}"
+        }
+

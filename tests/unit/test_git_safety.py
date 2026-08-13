@@ -324,3 +324,44 @@ def test_cycle_detection_blocks_execution():
     finally:
         app.api.recipes._CATALOG_BY_ID = original_catalog
 
+
+# ── Phase 6 Sandbox Execution & Worker Isolation Tests ─────────────────────────
+from app.core.git_safety import run_secured_command, validate_workspace_path, SubprocessSecurityError
+
+def test_workspace_path_traversal_gates(tmp_path):
+    """Verify that path traversal attempts outside workspace are blocked."""
+    workspace_root = str(tmp_path / "sandbox")
+    os.makedirs(workspace_root, exist_ok=True)
+    
+    # Inside boundary should succeed
+    inside = str(tmp_path / "sandbox" / "src")
+    os.makedirs(inside, exist_ok=True)
+    assert validate_workspace_path(inside, workspace_root) == os.path.abspath(inside)
+    
+    # Outside boundary should throw SubprocessSecurityError
+    outside = str(tmp_path / "outside_dir")
+    os.makedirs(outside, exist_ok=True)
+    with pytest.raises(SubprocessSecurityError):
+        validate_workspace_path(outside, workspace_root)
+
+
+def test_env_secrets_stripping(tmp_path):
+    """Verify that run_secured_command filters out DB/Redis credentials/secrets."""
+    workspace_root = str(tmp_path)
+    os.environ["DATABASE_PASSWORD"] = "extremelysecretpass"
+    os.environ["REDIS_URL"] = "redis://somehost:6379"
+    os.environ["PATH"] = "/usr/bin"
+    
+    # Import run_secured_command to verify it cleans env
+    import subprocess
+    import sys
+    
+    cmd = [sys.executable, "-c", "import os; print(list(os.environ.keys()))"]
+    res = run_secured_command(cmd, workspace_root, timeout_seconds=10)
+    
+    # Stderr/stdout should show stripped keys
+    stdout_keys = res["stdout"]
+    assert "DATABASE_PASSWORD" not in stdout_keys
+    assert "REDIS_URL" not in stdout_keys
+
+
