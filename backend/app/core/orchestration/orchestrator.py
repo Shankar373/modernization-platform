@@ -78,66 +78,209 @@ for b in _CSHARP_BUILDS:
 
 _orig_detect_version = UniversalScanner._detect_version
 
-def _enhanced_detect_version(self, language: str, ws: Path):
-    if language == "C#":
-        versions = set()
-        for csproj in ws.rglob("*.csproj"):
-            if self._is_ignored(csproj): continue
-            try:
-                content = csproj.read_text(encoding="utf-8", errors="replace")
-                # <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>  → .NET Framework 4.7.2
-                m_tfv = re.findall(r"<TargetFrameworkVersion>\s*v?([\d\.]+)\s*</TargetFrameworkVersion>", content, re.IGNORECASE)
-                for v in m_tfv:
-                    versions.add(f".NET Framework {v}")
-                # <TargetFramework>net461</TargetFramework> → .NET Framework 4.6.1
-                # <TargetFramework>net6.0-windows</TargetFramework> → .NET 6.0-windows
-                # <TargetFramework>net8.0</TargetFramework> → .NET 8.0
-                m_tf = re.findall(r"<TargetFramework>\s*([a-zA-Z0-9\.\-]+)\s*</TargetFramework>", content, re.IGNORECASE)
-                for tf in m_tf:
-                    tf_l = tf.lower()
-                    if tf_l.startswith("netcoreapp"):
-                        versions.add(f".NET Core {tf[10:]}")
-                    elif tf_l.startswith("net") and len(tf_l) >= 4 and tf_l[3].isdigit():
-                        suffix = tf[3:]  # e.g. '461', '472', '6.0-windows', '8.0'
-                        if "." in suffix or "-" in suffix:
-                            # Already dotted: net6.0-windows → .NET 6.0-windows
-                            major = suffix.split(".")[0]
-                            try:
-                                if int(major) >= 5:
-                                    versions.add(f".NET {suffix}")
-                                else:
-                                    versions.add(f".NET Framework {suffix}")
-                            except ValueError:
-                                versions.add(f".NET {suffix}")
-                        else:
-                            # Compact: net461 → 4.6.1, net47 → 4.7, net472 → 4.7.2
-                            digits = list(suffix)
-                            if len(digits) == 3:
-                                # net461 → 4.6.1
-                                fmt = f"{digits[0]}.{digits[1]}.{digits[2]}"
-                            elif len(digits) == 2:
-                                # net47 → 4.7
-                                fmt = f"{digits[0]}.{digits[1]}"
+def _enhanced_detect_version(self, language: str, ws: Path):  # noqa: C901
+    """Enhanced multi-language version detection. Falls back to original for unlisted languages."""
+    try:
+        if language == "C#":
+            versions = set()
+            for csproj in ws.rglob("*.csproj"):
+                if self._is_ignored(csproj): continue
+                try:
+                    content = csproj.read_text(encoding="utf-8", errors="replace")
+                    # <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+                    for v in re.findall(r"<TargetFrameworkVersion>\s*v?([\d\.]+)\s*</TargetFrameworkVersion>", content, re.IGNORECASE):
+                        versions.add(f".NET Framework {v}")
+                    # <TargetFramework>net461|net6.0|net8.0-windows</TargetFramework>
+                    for tf in re.findall(r"<TargetFramework>\s*([a-zA-Z0-9\.\-]+)\s*</TargetFramework>", content, re.IGNORECASE):
+                        tf_l = tf.lower()
+                        if tf_l.startswith("netcoreapp"):
+                            versions.add(f".NET Core {tf[10:]}")
+                        elif tf_l.startswith("net") and len(tf_l) >= 4 and tf_l[3].isdigit():
+                            suffix = tf[3:]
+                            if "." in suffix or "-" in suffix:
+                                major = suffix.split(".")[0]
+                                versions.add(f".NET {suffix}" if int(major) >= 5 else f".NET Framework {suffix}")
                             else:
-                                fmt = ".".join(digits)
-                            try:
-                                if int(digits[0]) >= 5:
-                                    versions.add(f".NET {fmt}")
+                                digits = list(suffix)
+                                if len(digits) == 3:
+                                    fmt = f"{digits[0]}.{digits[1]}.{digits[2]}"
+                                elif len(digits) == 2:
+                                    fmt = f"{digits[0]}.{digits[1]}"
                                 else:
-                                    versions.add(f".NET Framework {fmt}")
-                            except ValueError:
-                                versions.add(f".NET {fmt}")
-                    else:
-                        versions.add(tf)
-            except Exception:
-                pass
-        if versions:
-            # Sort: .NET Framework first, then .NET Core, then .NET x.y
-            def _sort_key(v: str):
-                if "Framework" in v: return (0, v)
-                if "Core" in v: return (1, v)
-                return (2, v)
-            return ", ".join(sorted(versions, key=_sort_key))
+                                    fmt = ".".join(digits)
+                                versions.add(f".NET {fmt}" if int(digits[0]) >= 5 else f".NET Framework {fmt}")
+                        else:
+                            versions.add(tf)
+                except Exception:
+                    pass
+            if versions:
+                def _cs_sort(v: str): return (0, v) if "Framework" in v else (1, v) if "Core" in v else (2, v)
+                return ", ".join(sorted(versions, key=_cs_sort))
+
+        elif language == "Java":
+            # pom.xml — java.version, maven.compiler.source/release
+            for pom in list(ws.rglob("pom.xml"))[:5]:
+                if self._is_ignored(pom): continue
+                try:
+                    c = pom.read_text(encoding="utf-8", errors="replace")
+                    for pat in [
+                        r"<java\.version>(\d+(?:\.\d+)?)</java\.version>",
+                        r"<maven\.compiler\.source>(\d+(?:\.\d+)?)</maven\.compiler\.source>",
+                        r"<maven\.compiler\.release>(\d+)</maven\.compiler\.release>",
+                        r"<source>(\d+(?:\.\d+)?)</source>",
+                    ]:
+                        m = re.search(pat, c)
+                        if m:
+                            return f"Java {m.group(1)}"
+                except Exception:
+                    pass
+            # build.gradle / build.gradle.kts — sourceCompatibility, jvmTarget
+            for grad in list(ws.rglob("build.gradle")) + list(ws.rglob("build.gradle.kts")):
+                if self._is_ignored(grad): continue
+                try:
+                    c = grad.read_text(encoding="utf-8", errors="replace")
+                    for pat in [
+                        r"sourceCompatibility\s*=\s*['\"]?(\d+(?:\.\d+)?)['\"]?",
+                        r"jvmTarget\s*=\s*['\"]([\d\.]+)['\"]?",
+                        r"JavaVersion\.VERSION_(\d+)",
+                    ]:
+                        m = re.search(pat, c)
+                        if m:
+                            ver = m.group(1).replace("_", ".")
+                            return f"Java {ver}"
+                except Exception:
+                    pass
+
+        elif language == "Python":
+            # runtime.txt → python-3.11.4  |  .python-version → 3.11
+            for fname in ["runtime.txt", ".python-version"]:
+                for p in [ws / fname] + list(ws.rglob(fname))[:3]:
+                    if p.exists() and not self._is_ignored(p):
+                        try:
+                            raw = p.read_text(encoding="utf-8", errors="replace").strip()
+                            m = re.search(r"python[-_ ]?([\d\.]+)", raw, re.IGNORECASE)
+                            if m: return f"Python {m.group(1)}"
+                            m = re.match(r"([\d\.]+)", raw)
+                            if m: return f"Python {m.group(1)}"
+                        except Exception:
+                            pass
+            # pyproject.toml — python_requires, target-version
+            for pp in list(ws.rglob("pyproject.toml"))[:3]:
+                if self._is_ignored(pp): continue
+                try:
+                    c = pp.read_text(encoding="utf-8", errors="replace")
+                    m = re.search(r'python_requires\s*=\s*["\']>=?([\d\.]+)', c)
+                    if m: return f"Python {m.group(1)}"
+                    m = re.search(r'target-version\s*=\s*["\']py(\d)(\d+)', c)
+                    if m: return f"Python {m.group(1)}.{m.group(2)}"
+                    m = re.search(r'requires-python\s*=\s*["\']>=?([\d\.]+)', c)
+                    if m: return f"Python {m.group(1)}"
+                except Exception:
+                    pass
+            # setup.cfg
+            for sc in list(ws.rglob("setup.cfg"))[:3]:
+                if self._is_ignored(sc): continue
+                try:
+                    c = sc.read_text(encoding="utf-8", errors="replace")
+                    m = re.search(r'python_requires\s*[=,]\s*>=?([\d\.]+)', c)
+                    if m: return f"Python {m.group(1)}"
+                except Exception:
+                    pass
+
+        elif language in ("JavaScript", "TypeScript"):
+            # .nvmrc or .node-version
+            for fname in [".nvmrc", ".node-version"]:
+                p = ws / fname
+                if p.exists():
+                    try:
+                        raw = p.read_text(encoding="utf-8", errors="replace").strip().lstrip("v")
+                        if re.match(r"[\d\.]+", raw):
+                            return f"Node {raw}"
+                    except Exception:
+                        pass
+            # package.json engines.node
+            for pkg in [ws / "package.json"] + list(ws.rglob("package.json"))[:3]:
+                if pkg.exists() and not self._is_ignored(pkg):
+                    try:
+                        import json as _json
+                        data = _json.loads(pkg.read_text(encoding="utf-8"))
+                        node_ver = data.get("engines", {}).get("node")
+                        if node_ver:
+                            clean = re.sub(r"[^\d\.]", "", node_ver.split("||")[0].strip()).strip(".")
+                            return f"Node {clean}" if clean else node_ver
+                    except Exception:
+                        pass
+            # tsconfig.json compilerOptions.target
+            if language == "TypeScript":
+                for tsc in list(ws.rglob("tsconfig.json"))[:3]:
+                    if self._is_ignored(tsc): continue
+                    try:
+                        import json as _json
+                        data = _json.loads(tsc.read_text(encoding="utf-8"))
+                        target = data.get("compilerOptions", {}).get("target", "")
+                        if target:
+                            return f"TypeScript / ES{target.replace('ES', '')}"
+                    except Exception:
+                        pass
+
+        elif language == "Go":
+            for gomod in list(ws.rglob("go.mod"))[:3]:
+                if self._is_ignored(gomod): continue
+                try:
+                    c = gomod.read_text(encoding="utf-8", errors="replace")
+                    m = re.search(r"^go\s+([\d\.]+)", c, re.MULTILINE)
+                    if m: return f"Go {m.group(1)}"
+                except Exception:
+                    pass
+
+        elif language == "PHP":
+            for comp in list(ws.rglob("composer.json"))[:3]:
+                if self._is_ignored(comp): continue
+                try:
+                    import json as _json
+                    data = _json.loads(comp.read_text(encoding="utf-8"))
+                    php_ver = data.get("require", {}).get("php", "")
+                    if php_ver:
+                        m = re.search(r"([\d\.]+)", php_ver)
+                        if m: return f"PHP {m.group(1)}"
+                except Exception:
+                    pass
+
+        elif language == "Ruby":
+            # .ruby-version first
+            rv = ws / ".ruby-version"
+            if rv.exists():
+                try:
+                    raw = rv.read_text(encoding="utf-8", errors="replace").strip()
+                    m = re.search(r"([\d\.]+)", raw)
+                    if m: return f"Ruby {m.group(1)}"
+                except Exception:
+                    pass
+            # Gemfile: ruby '3.2.0'
+            gemfile = ws / "Gemfile"
+            if gemfile.exists():
+                try:
+                    c = gemfile.read_text(encoding="utf-8", errors="replace")
+                    m = re.search(r"ruby\s+['\"]([\d\.]+)['\"]", c)
+                    if m: return f"Ruby {m.group(1)}"
+                except Exception:
+                    pass
+
+        elif language in ("Kotlin",):
+            for grad in list(ws.rglob("build.gradle.kts")) + list(ws.rglob("build.gradle")):
+                if self._is_ignored(grad): continue
+                try:
+                    c = grad.read_text(encoding="utf-8", errors="replace")
+                    m = re.search(r"jvmTarget\s*=\s*['\"]([\d\.]+)['\"]", c)
+                    if m: return f"Kotlin / JVM {m.group(1)}"
+                    # kotlin version in plugins block
+                    m = re.search(r'kotlin\(["\']jvm["\']\)\s+version\s+["\']([\d\.]+)', c)
+                    if m: return f"Kotlin {m.group(1)}"
+                except Exception:
+                    pass
+
+    except Exception:
+        pass
     return _orig_detect_version(self, language, ws)
 
 UniversalScanner._detect_version = _enhanced_detect_version
@@ -146,13 +289,17 @@ _orig_detect_languages = UniversalScanner._detect_languages
 
 def _enhanced_detect_languages(self, ws: Path, files: list[Path], ext_counts: dict):
     detected = _orig_detect_languages(self, ws, files, ext_counts)
+
+    # Enrich version for every detected language using enhanced version detection
+    for lang in detected:
+        if not lang.version:
+            lang.version = self._detect_version(lang.name, ws)
+
+    # C# special case — ensure it appears even if the base scanner missed it
     has_cs = any(f.suffix.lower() == ".cs" for f in files)
     has_proj = any(f.suffix.lower() in (".csproj", ".sln") for f in ws.rglob("*") if not self._is_ignored(f))
     cs_lang = next((l for l in detected if l.name == "C#"), None)
-    if cs_lang:
-        if not cs_lang.version:
-            cs_lang.version = self._detect_version("C#", ws)
-    elif has_cs or has_proj:
+    if not cs_lang and (has_cs or has_proj):
         from app.core.domain.models import DetectedLanguage, DetectionEvidence
         ver = self._detect_version("C#", ws)
         detected.append(DetectedLanguage(
@@ -161,9 +308,11 @@ def _enhanced_detect_languages(self, ws: Path, files: list[Path], ext_counts: di
             confidence=0.9,
             evidence=[DetectionEvidence(description="Found C# source/project files", weight=0.9)],
         ))
+
     return detected
 
 UniversalScanner._detect_languages = _enhanced_detect_languages
+
 
 
 _orig_detect_dependencies = UniversalScanner._detect_dependencies
@@ -193,52 +342,199 @@ def _enhanced_detect_dependencies(self, ws: Path):
 UniversalScanner._detect_dependencies = _enhanced_detect_dependencies
 
 _orig_detect_testing = UniversalScanner._detect_testing_frameworks
+
+# All source/test file extensions across enterprise languages the user listed
+_ALL_SOURCE_EXTENSIONS = frozenset({
+    # JVM
+    ".java", ".kt", ".kts", ".groovy", ".scala",
+    # .NET
+    ".cs", ".fs", ".fsx", ".vb", ".vbs",
+    # Web
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    # Native
+    ".cpp", ".cc", ".cxx", ".h", ".hpp", ".c",
+    # Systems
+    ".go", ".rs",
+    # Scripting / Dynamic
+    ".py", ".rb", ".php", ".lua", ".r", ".R",
+    # Mobile / Cross-platform
+    ".swift", ".m", ".mm", ".dart",
+    # Shell / Infra
+    ".sh", ".bash", ".ps1",
+    # Functional
+    ".ex", ".exs", ".erl", ".hrl", ".hs", ".lhs", ".clj", ".cljs",
+    # Data / Config
+    ".sql",
+    # Build/config files that contain test deps
+    ".csproj", ".config",
+})
+
+# Per-language test framework signatures: {framework_name: [markers...]}
+# Markers are matched case-insensitively against source file content
+_TEST_FRAMEWORK_SIGNATURES: dict[str, list[str]] = {
+    # C# / .NET
+    "MSTest":           ["microsoft.visualstudio.testtools.unittesting", "[testclass]", "[testmethod]", "mstest.testframework"],
+    "NUnit":            ["nunit.framework", "[testfixture]", "[test]", "nunit"],
+    "xUnit":            ["xunit", "[fact]", "[theory]", "xunit.core"],
+    # Java / Kotlin
+    "JUnit 5":          ["org.junit.jupiter", "@test", "junit.jupiter", "@extendwith"],
+    "JUnit 4":          ["org.junit.test", "import org.junit;", "junit:junit"],
+    "TestNG":           ["org.testng", "testng", "@test", "testng.annotations"],
+    "Mockito":          ["mockito", "@mock", "@injectmocks", "mockito-core"],
+    "Spock":            ["spock.lang", "spockframework", "def \"should "],
+    "Kotest":           ["io.kotest", "kotest-runner", "shouldbe", "describe {"],
+    # Python
+    "pytest":           ["import pytest", "from pytest", "@pytest.fixture", "def test_", "pytest"],
+    "unittest":         ["import unittest", "testcase", "unittest.main"],
+    "nose2":            ["nose2", "import nose"],
+    # JavaScript / TypeScript
+    "Jest":             ["jest", "describe(", "it(", "test(", "expect(", "beforeeach", "aftereach"],
+    "Vitest":           ["vitest", "from 'vitest'", "from \"vitest\""],
+    "Mocha":            ["mocha", "describe(", "it(", "before(", "after("],
+    "Jasmine":          ["jasmine", "describe(", "it(", "expect("],
+    "Cypress":          ["cypress", "cy.visit", "cy.get", "cy."],
+    "Playwright":       ["@playwright/test", "test.describe", "page.goto"],
+    # Go
+    "Go test":          ["testing.t", "func test", "t.run(", "testmain"],
+    # PHP
+    "PHPUnit":          ["phpunit", "use phpunit", "extends testcase", "@test"],
+    # Ruby
+    "RSpec":            ["rspec", "describe ", "it \"should", "expect("],
+    "Minitest":         ["minitest", "test_", "assert_equal"],
+    # Rust
+    "Rust test":        ["#[test]", "#[cfg(test)]", "mod tests {"],
+    # Swift
+    "XCTest":           ["xctest", "func test", "xctassert"],
+    # C / C++
+    "Google Test":      ["gtest", "googletest", "test_f(", "test_p(", "expect_eq"],
+    "Catch2":           ["catch2", "require(", "test_case(", "section("],
+    # Elixir
+    "ExUnit":           ["exunit", "use exunit.case", "defmodule", "test \""],
+    # Haskell
+    "HUnit":            ["hunit", "test.hunit", "testcase", "assertequal"],
+    "QuickCheck":       ["quickcheck", "prop_", "arbitrary"],
+    # Clojure
+    "clojure.test":     ["clojure.test", "deftest", "is (", "testing \""],
+    # Scala
+    "ScalaTest":        ["scalatest", "funsuite", "flatspec", "behavior of"],
+    # Dart / Flutter
+    "Flutter test":     ["flutter_test", "testwidgets", "expect(", "group("],
+    # Shell
+    "Bats":             ["bats", "@test", "load 'test_helper'"],
+}
+
+# Manifest files that declare test deps (by language)
+_TEST_MANIFEST_CHECKS: list[tuple[str, str, str]] = [
+    # (glob, framework_name, marker_string)
+    ("packages.config",     "MSTest",   "mstest"),
+    ("packages.config",     "NUnit",    "nunit"),
+    ("packages.config",     "xUnit",    "xunit"),
+    ("*.csproj",             "MSTest",   "mstest"),
+    ("*.csproj",             "NUnit",    "nunit"),
+    ("*.csproj",             "xUnit",    "xunit"),
+    ("pom.xml",              "JUnit 5",  "junit-jupiter"),
+    ("pom.xml",              "JUnit 4",  "junit:junit"),
+    ("pom.xml",              "TestNG",   "testng"),
+    ("pom.xml",              "Mockito",  "mockito"),
+    ("build.gradle",         "JUnit 5",  "junit-jupiter"),
+    ("build.gradle",         "JUnit 4",  "junit:junit"),
+    ("build.gradle",         "TestNG",   "testng"),
+    ("build.gradle",         "Kotest",   "kotest"),
+    ("build.gradle.kts",     "JUnit 5",  "junit-jupiter"),
+    ("build.gradle.kts",     "Kotest",   "kotest"),
+    ("package.json",         "Jest",     "jest"),
+    ("package.json",         "Vitest",   "vitest"),
+    ("package.json",         "Mocha",    "mocha"),
+    ("package.json",         "Jasmine",  "jasmine"),
+    ("package.json",         "Cypress",  "cypress"),
+    ("package.json",         "Playwright", "@playwright/test"),
+    ("requirements*.txt",    "pytest",   "pytest"),
+    ("requirements*.txt",    "unittest", "unittest"),
+    ("pyproject.toml",       "pytest",   "pytest"),
+    ("pyproject.toml",       "unittest", "unittest"),
+    ("Gemfile",              "RSpec",    "rspec"),
+    ("Gemfile",              "Minitest", "minitest"),
+    ("composer.json",        "PHPUnit",  "phpunit"),
+    ("Cargo.toml",           "Rust test", "[dev-dependencies]"),
+    ("go.mod",               "Go test",  "testing"),
+]
+
 def _enhanced_detect_testing(self, ws: Path, files: list[Path]):
-    found = _orig_detect_testing(self, ws, files)
-    
-    # 1. Inspect C# packages.config & .csproj for test packages
-    for pkg_config in ws.rglob("packages.config"):
-        if self._is_ignored(pkg_config): continue
-        try:
-            content = pkg_config.read_text(encoding="utf-8", errors="replace").lower()
-            if "mstest" in content and "MSTest" not in found:
-                found.append("MSTest")
-            if "nunit" in content and "NUnit" not in found:
-                found.append("NUnit")
-            if "xunit" in content and "xUnit" not in found:
-                found.append("xUnit")
-        except Exception:
-            pass
+    found: list[str] = _orig_detect_testing(self, ws, files)
+    found_set: set[str] = set(found)
 
-    for csproj in ws.rglob("*.csproj"):
-        if self._is_ignored(csproj): continue
-        try:
-            content = csproj.read_text(encoding="utf-8", errors="replace").lower()
-            if "mstest" in content and "MSTest" not in found:
-                found.append("MSTest")
-            if "nunit" in content and "NUnit" not in found:
-                found.append("NUnit")
-            if "xunit" in content and "xUnit" not in found:
-                found.append("xUnit")
-        except Exception:
-            pass
-
-    # 2. Inspect C# & multi-language source code for test annotations
-    csharp_test_checks = {
-        "MSTest": ["microsoft.visualstudio.testtools.unittesting", "mstest", "[testclass]", "[testmethod]"],
-        "NUnit": ["nunit.framework", "nunit", "[testfixture]"],
-        "xUnit": ["xunit", "[fact]", "[theory]"],
-    }
-    all_text = ""
-    for f in files[:300]:
-        if f.suffix.lower() in (".cs", ".csproj", ".config", ".py", ".java", ".js", ".ts"):
+    # ── Pass 1: Scan manifest / project files for test package references ─────
+    for glob_pat, fw_name, marker in _TEST_MANIFEST_CHECKS:
+        if fw_name in found_set:
+            continue
+        for mfile in ws.rglob(glob_pat):
+            if self._is_ignored(mfile):
+                continue
             try:
-                all_text += f.read_text(encoding="utf-8", errors="replace")[:2000]
+                content = mfile.read_text(encoding="utf-8", errors="replace").lower()
+                if marker.lower() in content:
+                    found.append(fw_name)
+                    found_set.add(fw_name)
+                    break
             except Exception:
                 pass
-    for name, markers in csharp_test_checks.items():
-        if name not in found and any(m in all_text.lower() for m in markers):
-            found.append(name)
+
+    # ── Pass 2: Scan TEST-SPECIFIC source files for annotations/imports ────────
+    # Only files that are plausibly test files (by name or directory) to avoid
+    # false positives from app code containing describe/expect/it patterns.
+    _TEST_DIR_PARTS = frozenset({
+        "test", "tests", "spec", "specs", "__tests__", "__test__",
+        "unittest", "unittests", "integration", "e2e", "acceptance",
+    })
+    _TEST_FILE_PATTERNS = frozenset({
+        "test_", "_test.", ".test.", ".spec.", "_spec.",
+        "test.", "spec.", "tests.",
+    })
+
+    def _is_test_file(p: Path) -> bool:
+        # Check if any directory part is a known test directory
+        for part in p.parts:
+            if part.lower() in _TEST_DIR_PARTS:
+                return True
+        # Check filename patterns (prefix/suffix style: test_foo.py, foo_test.go)
+        name_lower = p.name.lower()
+        if any(pat in name_lower for pat in _TEST_FILE_PATTERNS):
+            return True
+        # Check if the file stem CONTAINS the word "test" or "spec" as a word
+        # Covers: UnitTest1.cs, MyTests.java, FooSpec.rb, TestHelper.js
+        stem_lower = p.stem.lower()
+        if "test" in stem_lower or "spec" in stem_lower:
+            return True
+        return False
+
+
+    source_chunks: list[str] = []
+    total_chars = 0
+    max_total = 4_000_000   # 4 MB total cap
+    per_file_cap = 8_000    # 8 KB per file
+
+    for f in files:
+        if total_chars >= max_total:
+            break
+        if f.suffix.lower() not in _ALL_SOURCE_EXTENSIONS:
+            continue
+        if not _is_test_file(f):
+            continue  # Skip non-test files to avoid false positives
+        try:
+            chunk = f.read_text(encoding="utf-8", errors="replace")[:per_file_cap]
+            source_chunks.append(chunk)
+            total_chars += len(chunk)
+        except Exception:
+            pass
+
+    all_text_lower = "\n".join(source_chunks).lower()
+
+    for fw_name, markers in _TEST_FRAMEWORK_SIGNATURES.items():
+        if fw_name in found_set:
+            continue
+        if any(m.lower() in all_text_lower for m in markers):
+            found.append(fw_name)
+            found_set.add(fw_name)
 
     return found
 
