@@ -98,9 +98,10 @@ pip install -r requirements.txt
 # Run PostgreSQL database migrations
 alembic upgrade head
 
-# Start FastAPI server
-uvicorn app.main:app --port 8000 --reload
+# Start FastAPI server (with 1GB upload limit)
+$env:MAX_UPLOAD_SIZE_MB="1024"; uvicorn app.main:app --port 8000 --reload
 ```
+
 
 ### 3. Start Celery Background Worker
 In a new terminal:
