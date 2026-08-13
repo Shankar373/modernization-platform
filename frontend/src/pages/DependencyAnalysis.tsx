@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { runDependencyAnalysis, clearDependencyCache } from '../api/client';
 import type {
@@ -83,8 +83,40 @@ function SummaryCard({ label, count, color, icon }: { label: string; count: numb
 
 export default function DependencyAnalysisPage() {
   const [sp] = useSearchParams();
-  const workspacePath = sp.get('wp') || '';
-  const projectId = sp.get('project') || '';
+  const [workspacePath, setWorkspacePath] = useState('');
+  const [projectId, setProjectId] = useState('');
+
+  // Extract from query params or resolve fallback from session storage
+  useEffect(() => {
+    let wp = sp.get('wp') || '';
+    let projId = sp.get('project') || '';
+
+    if (!wp) {
+      const keys = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key?.startsWith('project_')) {
+          keys.push(key);
+        }
+      }
+      if (keys.length > 0) {
+        keys.sort();
+        const latestKey = keys[keys.length - 1];
+        try {
+          const proj = JSON.parse(sessionStorage.getItem(latestKey) || '{}');
+          if (proj.workspace_path) {
+            wp = proj.workspace_path;
+            projId = proj.project_id || '';
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    setWorkspacePath(wp);
+    setProjectId(projId);
+  }, [sp]);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DependencyAnalysisResult | null>(null);
@@ -92,11 +124,13 @@ export default function DependencyAnalysisPage() {
   const [filter, setFilter] = useState<DependencyStatus | 'ALL'>('ALL');
   const hasRun = useRef(false);
 
-  // Auto-run on first mount if wp is provided
-  if (workspacePath && !hasRun.current && !loading && !result) {
-    hasRun.current = true;
-    setTimeout(() => handleRun(), 0);
-  }
+  // Auto-run on first mount or when workspacePath is resolved
+  useEffect(() => {
+    if (workspacePath && !hasRun.current && !loading && !result) {
+      hasRun.current = true;
+      handleRun();
+    }
+  }, [workspacePath]);
 
   async function handleRun(forceRefresh = false) {
     if (!workspacePath) return;
@@ -113,7 +147,19 @@ export default function DependencyAnalysisPage() {
 
   async function handleRefresh() {
     if (workspacePath) await clearDependencyCache(workspacePath);
-    handleRun(true);
+    hasRun.current = false;
+    // Trigger run again
+    if (workspacePath) {
+      setLoading(true); setError(''); setResult(null);
+      try {
+        const res = await runDependencyAnalysis(workspacePath, projectId, true);
+        setResult(res.data as DependencyAnalysisResult);
+      } catch (e: any) {
+        setError(e?.response?.data?.detail || 'Dependency analysis failed.');
+      } finally {
+        setLoading(false);
+      }
+    }
   }
 
   const filteredDeps = result?.dependencies?.filter(
@@ -200,136 +246,54 @@ export default function DependencyAnalysisPage() {
                   color: f.is_lockfile ? 'var(--color-text-muted)' : 'var(--color-accent-2)',
                 }}>
                   {ECO_ICONS[f.ecosystem] || '📦'} {f.path}
-                  {f.is_lockfile && <span style={{ fontSize: 10, opacity: 0.7 }}> 🔒 lockfile</span>}
                 </span>
               ))}
-              {result.dependency_files.length === 0 && (
-                <p className="text-muted">No dependency files found in workspace.</p>
-              )}
             </div>
           </div>
 
-          {/* Updated files */}
-          {result.changed_files.length > 0 && (
-            <div style={{
-              background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)',
-              borderRadius: 12, padding: '16px 20px', marginBottom: 20,
-            }}>
-              <p style={{ fontWeight: 700, marginBottom: 8 }}>
-                💾 {result.changed_files.length} file(s) updated on disk
-              </p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {result.changed_files.map(f => (
-                  <span key={f} style={{
-                    padding: '3px 10px', borderRadius: 6, fontSize: 12, fontFamily: 'monospace',
-                    background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)',
-                    color: '#34d399',
-                  }}>{f}</span>
-                ))}
-              </div>
-              <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
-                Validation: <strong style={{ color: result.validation_status === 'PASSED' ? '#34d399' : result.validation_status === 'FAILED' ? '#ef4444' : 'var(--color-text-muted)' }}>
-                  {result.validation_status}
-                </strong>
-                {result.validation_errors.length > 0 && (
-                  <span style={{ color: '#fca5a5', marginLeft: 8 }}>⚠ {result.validation_errors.join(' · ')}</span>
-                )}
-              </p>
-            </div>
-          )}
-
-          {/* Dependencies table */}
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header">
-              <h3>Dependencies ({filteredDeps.length}{filter !== 'ALL' ? ` of ${result.dependencies.length}` : ''})</h3>
-              {/* Filter buttons */}
+          {/* Detailed table */}
+          <div className="card">
+            <div className="card-header flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <h3>Detailed Diagnostics</h3>
               <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-                {(['ALL', 'UPDATE_AVAILABLE', 'UP_TO_DATE', 'CONSTRAINT_BLOCKED', 'LOOKUP_FAILED'] as const).map(f => (
+                {(['ALL', 'UP_TO_DATE', 'UPDATE_AVAILABLE', 'CONSTRAINT_BLOCKED', 'LOOKUP_FAILED'] as const).map(f => (
                   <button
                     key={f}
+                    className={`btn ${filter === f ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+                    style={{ fontSize: 11, padding: '4px 10px' }}
                     onClick={() => setFilter(f)}
-                    style={{
-                      padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                      border: `1px solid ${filter === f ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                      background: filter === f ? 'rgba(99,102,241,0.15)' : 'transparent',
-                      color: filter === f ? 'var(--color-accent-2)' : 'var(--color-text-muted)',
-                    }}
                   >
-                    {f === 'ALL' ? 'All' : STATUS_CONFIG[f]?.label ?? f}
+                    {f.replace('_', ' ')}
                   </button>
                 ))}
               </div>
             </div>
 
-            {filteredDeps.length === 0 ? (
-              <p className="text-muted" style={{ padding: 20 }}>No dependencies matching the current filter.</p>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-                      {['Package', 'Current', 'Latest (live)', 'Status', 'Source File'].map(h => (
-                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredDeps.map(dep => <DepRow key={`${dep.name}-${dep.source_file}`} dep={dep} />)}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Proposed updates */}
-          {result.proposed_updates.length > 0 && (
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header"><h3>Update Plan ({result.proposed_updates.length})</h3></div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {result.proposed_updates.map(u => (
-                  <div key={`${u.dependency_name}-${u.source_file}`} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '10px 14px', borderRadius: 8,
-                    background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)',
-                    flexWrap: 'wrap',
-                  }}>
-                    <span style={{ fontWeight: 600, minWidth: 160 }}>{u.dependency_name}</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-muted)' }}>
-                      {u.current_version ?? '—'}
-                    </span>
-                    <span style={{ color: '#f59e0b' }}>→</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#34d399', fontWeight: 700 }}>
-                      {u.proposed_version}
-                    </span>
-                    <span className="badge badge-assessment" style={{ fontSize: 10, marginLeft: 4 }}>{u.source_file}</span>
-                    <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>{u.reason}</span>
-                  </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--color-border)', color: 'var(--color-text-muted)', fontSize: 12, fontWeight: 700 }}>
+                  <th style={{ padding: '10px 12px' }}>NAME</th>
+                  <th style={{ padding: '10px 12px' }}>CURRENT</th>
+                  <th style={{ padding: '10px 12px' }}>LATEST STABLE</th>
+                  <th style={{ padding: '10px 12px' }}>STATUS</th>
+                  <th style={{ padding: '10px 12px' }}>SOURCE FILE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDeps.map(d => (
+                  <DepRow key={`${d.name}-${d.source_file}`} dep={d} />
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Warnings */}
-          {result.warnings.length > 0 && (
-            <div style={{
-              padding: '14px 18px', borderRadius: 10, marginBottom: 20,
-              background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
-            }}>
-              <p style={{ fontWeight: 600, marginBottom: 8 }}>⚠ Warnings ({result.warnings.length})</p>
-              {result.warnings.map((w, i) => (
-                <p key={i} style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>• {w}</p>
-              ))}
-            </div>
-          )}
+                {filteredDeps.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                      No dependencies found matching this filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </>
-      )}
-
-      {/* Empty state */}
-      {!loading && !result && !error && workspacePath && (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-text-muted)' }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
-          <p>Initializing dependency analysis...</p>
-        </div>
       )}
     </div>
   );
