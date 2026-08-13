@@ -9,7 +9,9 @@ const LANG_ICONS: Record<string, string> = {
   python: '🐍', javascript: '🟨', typescript: '🔷', html: '🌐',
   css: '🎨', java: '☕', json: '{ }', yaml: '📄', markdown: '📝',
   go: '🔵', ruby: '💎', php: '🐘', shell: '🖥️', generic: '📦',
+  csharp: '🔷', 'c#': '🔷',
 };
+
 
 const STATUS_CLASSES: Record<string, string> = {
   AVAILABLE: 'badge-available', PARTIAL: 'badge-partial',
@@ -459,37 +461,100 @@ export default function Analysis() {
         <div className="card-header"><h3>Technology Fingerprint</h3></div>
         {techProfile?.languages?.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {techProfile.languages.map((lang: any) => (
-              <div key={lang.name} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span style={{ fontSize: 18 }}>{LANG_ICONS[lang.name.toLowerCase()] || '📦'}</span>
-                <span style={{ width: 100, fontWeight: 600 }}>{lang.name}</span>
-                {lang.version && <span className="text-muted text-mono text-sm">v{lang.version}</span>}
-                <div style={{ flex: 1 }}>
-                  <div className="confidence-bar" style={{ maxWidth: 200 }}>
-                    <div className="confidence-fill" style={{ width: `${lang.confidence * 100}%` }} />
+            {techProfile.languages.map((lang: any) => {
+              // Versions that already start with "." or letters don't need a "v" prefix
+              const rawVer: string | undefined = lang.version;
+              const versionLabel = rawVer
+                ? rawVer.startsWith('.') || rawVer.startsWith('v')
+                  ? rawVer
+                  : `v${rawVer}`
+                : null;
+              // For multi-version strings (C# .NET), split them for tag display
+              const versionTags = rawVer && rawVer.includes(', ')
+                ? rawVer.split(', ').map((v: string) => v.trim())
+                : null;
+              return (
+                <div key={lang.name}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: versionTags ? 8 : 0 }}>
+                    <span style={{ fontSize: 18 }}>{LANG_ICONS[lang.name.toLowerCase()] || '📦'}</span>
+                    <span style={{ width: 100, fontWeight: 600 }}>{lang.name}</span>
+                    {versionLabel && !versionTags && (
+                      <span className="text-muted text-mono text-sm">{versionLabel}</span>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div className="confidence-bar" style={{ maxWidth: 200 }}>
+                        <div className="confidence-fill" style={{ width: `${lang.confidence * 100}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-sm text-muted">{(lang.confidence * 100).toFixed(0)}% confidence</span>
+                    <span className={`badge ${supported_languages.includes(lang.name.toLowerCase()) ? 'badge-available' : 'badge-unavailable'}`}>
+                      {supported_languages.includes(lang.name.toLowerCase()) ? 'SUPPORTED' : 'UNSUPPORTED'}
+                    </span>
                   </div>
+                  {/* Multi-version display: e.g. for C# .NET Framework 4.6.1, 4.7, 4.7.2, .NET 6.0-windows */}
+                  {versionTags && (
+                    <div style={{ marginLeft: 134, marginBottom: 4 }}>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                        letterSpacing: '0.08em', color: 'var(--color-text-muted)',
+                        marginRight: 8,
+                      }}>
+                        Detected Targets
+                      </span>
+                      <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+                        {versionTags.map((v: string) => (
+                          <span key={v} style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            background: v.includes('Framework')
+                              ? 'rgba(99,102,241,0.15)'
+                              : v.includes('Core')
+                                ? 'rgba(16,185,129,0.12)'
+                                : 'rgba(59,130,246,0.12)',
+                            color: v.includes('Framework')
+                              ? '#a5b4fc'
+                              : v.includes('Core')
+                                ? '#6ee7b7'
+                                : '#93c5fd',
+                            border: '1px solid',
+                            borderColor: v.includes('Framework')
+                              ? 'rgba(99,102,241,0.3)'
+                              : v.includes('Core')
+                                ? 'rgba(16,185,129,0.3)'
+                                : 'rgba(59,130,246,0.3)',
+                          }}>
+                            {v}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <span className="text-sm text-muted">{(lang.confidence * 100).toFixed(0)}% confidence</span>
-                <span className={`badge ${supported_languages.includes(lang.name.toLowerCase()) ? 'badge-available' : 'badge-unavailable'}`}>
-                  {supported_languages.includes(lang.name.toLowerCase()) ? 'SUPPORTED' : 'UNSUPPORTED'}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="text-muted">No languages detected. Is the workspace path correct?</p>
         )}
       </div>
 
-      {/* ── Frameworks & Build Systems ──────────────────────────────────────── */}
-      {(techProfile?.frameworks?.length > 0 || techProfile?.build_systems?.length > 0) && (
+      {/* ── Frameworks, Build Systems & Test Frameworks ──────────────────────── */}
+      {(techProfile?.frameworks?.length > 0 || techProfile?.build_systems?.length > 0 || techProfile?.testing_frameworks?.length > 0) && (
+
         <div className="card-grid" style={{ marginBottom: 20 }}>
           {techProfile.frameworks?.length > 0 && (
             <div className="card">
-              <h3 style={{ marginBottom: 12 }}>Frameworks</h3>
+              <h3 style={{ marginBottom: 12 }}>🏗️ Frameworks</h3>
               {techProfile.frameworks.map((f: any) => (
                 <div key={f.name} className="flex items-center gap-2" style={{ marginBottom: 8 }}>
-                  <span>{f.name}</span>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: 'var(--color-accent)', display: 'inline-block', flexShrink: 0,
+                  }} />
+                  <span style={{ fontWeight: 500 }}>{f.name}</span>
                   <span className="text-muted text-sm">({f.language})</span>
                 </div>
               ))}
@@ -497,17 +562,41 @@ export default function Analysis() {
           )}
           {techProfile.build_systems?.length > 0 && (
             <div className="card">
-              <h3 style={{ marginBottom: 12 }}>Build Systems</h3>
+              <h3 style={{ marginBottom: 12 }}>⚙️ Build Systems</h3>
               {techProfile.build_systems.map((b: any) => (
                 <div key={b.name} className="flex items-center gap-2" style={{ marginBottom: 8 }}>
-                  <span>{b.name}</span>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: 'var(--color-success)', display: 'inline-block', flexShrink: 0,
+                  }} />
+                  <span style={{ fontWeight: 500 }}>{b.name}</span>
                   <span className="text-muted text-sm">({b.language})</span>
                 </div>
               ))}
             </div>
           )}
+          {/* Test Frameworks card — always shown when the outer condition is true */}
+          <div className="card">
+            <h3 style={{ marginBottom: 12 }}>🧪 Test Frameworks</h3>
+            {techProfile.testing_frameworks?.length > 0 ? (
+              techProfile.testing_frameworks.map((t: string) => (
+                <div key={t} className="flex items-center gap-2" style={{ marginBottom: 8 }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: '#f59e0b', display: 'inline-block', flexShrink: 0,
+                  }} />
+                  <span style={{ fontWeight: 500 }}>{t}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted" style={{ marginTop: 4 }}>
+                Not detected — no test files or test package references found in this project.
+              </p>
+            )}
+          </div>
         </div>
       )}
+
 
       {/* ── Capabilities grid ──────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 20 }}>

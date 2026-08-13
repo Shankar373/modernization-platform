@@ -85,27 +85,59 @@ def _enhanced_detect_version(self, language: str, ws: Path):
             if self._is_ignored(csproj): continue
             try:
                 content = csproj.read_text(encoding="utf-8", errors="replace")
+                # <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>  → .NET Framework 4.7.2
                 m_tfv = re.findall(r"<TargetFrameworkVersion>\s*v?([\d\.]+)\s*</TargetFrameworkVersion>", content, re.IGNORECASE)
                 for v in m_tfv:
                     versions.add(f".NET Framework {v}")
+                # <TargetFramework>net461</TargetFramework> → .NET Framework 4.6.1
+                # <TargetFramework>net6.0-windows</TargetFramework> → .NET 6.0-windows
+                # <TargetFramework>net8.0</TargetFramework> → .NET 8.0
                 m_tf = re.findall(r"<TargetFramework>\s*([a-zA-Z0-9\.\-]+)\s*</TargetFramework>", content, re.IGNORECASE)
                 for tf in m_tf:
                     tf_l = tf.lower()
                     if tf_l.startswith("netcoreapp"):
                         versions.add(f".NET Core {tf[10:]}")
                     elif tf_l.startswith("net") and len(tf_l) >= 4 and tf_l[3].isdigit():
-                        num = tf[3:]
-                        if "." in num or float(num if num.replace(".", "", 1).isdigit() else 0) >= 5:
-                            versions.add(f".NET {num}")
+                        suffix = tf[3:]  # e.g. '461', '472', '6.0-windows', '8.0'
+                        if "." in suffix or "-" in suffix:
+                            # Already dotted: net6.0-windows → .NET 6.0-windows
+                            major = suffix.split(".")[0]
+                            try:
+                                if int(major) >= 5:
+                                    versions.add(f".NET {suffix}")
+                                else:
+                                    versions.add(f".NET Framework {suffix}")
+                            except ValueError:
+                                versions.add(f".NET {suffix}")
                         else:
-                            fmt = ".".join(list(num))
-                            versions.add(f".NET Framework {fmt}")
+                            # Compact: net461 → 4.6.1, net47 → 4.7, net472 → 4.7.2
+                            digits = list(suffix)
+                            if len(digits) == 3:
+                                # net461 → 4.6.1
+                                fmt = f"{digits[0]}.{digits[1]}.{digits[2]}"
+                            elif len(digits) == 2:
+                                # net47 → 4.7
+                                fmt = f"{digits[0]}.{digits[1]}"
+                            else:
+                                fmt = ".".join(digits)
+                            try:
+                                if int(digits[0]) >= 5:
+                                    versions.add(f".NET {fmt}")
+                                else:
+                                    versions.add(f".NET Framework {fmt}")
+                            except ValueError:
+                                versions.add(f".NET {fmt}")
                     else:
                         versions.add(tf)
             except Exception:
                 pass
         if versions:
-            return ", ".join(sorted(list(versions)))
+            # Sort: .NET Framework first, then .NET Core, then .NET x.y
+            def _sort_key(v: str):
+                if "Framework" in v: return (0, v)
+                if "Core" in v: return (1, v)
+                return (2, v)
+            return ", ".join(sorted(versions, key=_sort_key))
     return _orig_detect_version(self, language, ws)
 
 UniversalScanner._detect_version = _enhanced_detect_version

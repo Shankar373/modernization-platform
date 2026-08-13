@@ -380,16 +380,35 @@ class CSharpRoslynAdapter(MigrationAdapter):
         ]
 
     def create_plan(self, workspace_path: str, profile: TechnologyProfile, target_version: str, migration_profile: MigrationProfile = MigrationProfile.CONSERVATIVE) -> MigrationPlan:
+        import hashlib
+        project_id = hashlib.md5(workspace_path.encode()).hexdigest()[:8]
         return MigrationPlan(
             plan_id=f"csharp-plan-{os.urandom(4).hex()}",
+            project_id=project_id,
             targets=[MigrationTarget(language="csharp", target_version=target_version or "net8.0")],
             steps=[
-                PlanStep(step_id="step-1", name="Roslyn AST Syntax Modernization", adapter="csharp", capability="csharp-roslyn-ast"),
-                PlanStep(step_id="step-2", name=".NET Target Framework Upgrade", adapter="csharp", capability="csharp-dotnet-upgrade"),
-                PlanStep(step_id="step-3", name="Roslyn Formatting & Code Clean", adapter="csharp", capability="csharp-modernization"),
+                PlanStep(
+                    step_id="step-1", order=1,
+                    name="Roslyn AST Syntax Modernization",
+                    description="Convert block-scoped namespaces to file-scoped, modernize using declarations and type syntax",
+                    adapter="csharp", capability="csharp-roslyn-ast",
+                ),
+                PlanStep(
+                    step_id="step-2", order=2,
+                    name=".NET Target Framework Upgrade",
+                    description=f"Upgrade <TargetFramework> in all .csproj files to {target_version or 'net8.0'}",
+                    adapter="csharp", capability="csharp-dotnet-upgrade",
+                ),
+                PlanStep(
+                    step_id="step-3", order=3,
+                    name="Roslyn Formatting & Code Clean",
+                    description="Run dotnet format to apply Roslyn code style rules and clean up formatting",
+                    adapter="csharp", capability="csharp-modernization",
+                ),
             ],
             profile=migration_profile,
         )
+
 
     def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
         ws = Path(workspace_path)
