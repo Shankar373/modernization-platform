@@ -234,3 +234,93 @@ async def test_checkpoint_creation_and_rollback(temp_git_repo):
     # 4. Verify file was reverted to baseline
     with open(test_file, "r") as f:
         assert f.read() == "initial baseline content"
+
+
+from fastapi import HTTPException
+from app.api.recipes import (
+    _score_recipe,
+    _resolve_execution_order,
+    _is_version_compatible,
+    RecommendRequest,
+)
+
+def test_recipe_scoring_determinism():
+    """Verify that scoring is completely deterministic and yields reasons list."""
+    req = RecommendRequest(
+        project_id="test-proj",
+        workspace_path="/tmp/test",
+        languages=["python"],
+        frameworks=["django"],
+        detected_deps=["django"],
+        has_tests=True,
+        has_ci=False
+    )
+    
+    recipe = {
+        "id": "test-recipe",
+        "language": "python",
+        "category": "upgrade",
+        "complexity": "medium",
+        "tags": ["django", "ci"]
+    }
+    
+    score1, reasons1 = _score_recipe(recipe, req)
+    score2, reasons2 = _score_recipe(recipe, req)
+    
+    assert score1 == score2
+    assert reasons1 == reasons2
+    assert score1 > 0
+    assert any("language" in r.lower() for r in reasons1)
+
+
+def test_version_compatibility_gates():
+    """Verify that version limits prevent inapplicable recipe execution."""
+    recipe = {
+        "id": "java17-recipe",
+        "min_version": "17",
+        "max_version": "21"
+    }
+    
+    assert _is_version_compatible(recipe, "8", "11") is False
+    assert _is_version_compatible(recipe, "11", "17") is True
+    assert _is_version_compatible(recipe, "17", "21") is True
+
+
+def test_transitive_dependency_resolution():
+    """Verify that topological sort resolves transitive dependencies in correct sequence."""
+    import app.api.recipes
+    mock_catalog = {
+        "recipe-A": {"id": "recipe-A", "requires": ["recipe-B"]},
+        "recipe-B": {"id": "recipe-B", "requires": ["recipe-C"]},
+        "recipe-C": {"id": "recipe-C", "requires": []}
+    }
+    
+    original_catalog = app.api.recipes._CATALOG_BY_ID
+    app.api.recipes._CATALOG_BY_ID = mock_catalog
+    try:
+        resolved = _resolve_execution_order(["recipe-A"])
+        assert resolved == ["recipe-C", "recipe-B", "recipe-A"]
+    finally:
+        app.api.recipes._CATALOG_BY_ID = original_catalog
+
+
+def test_cycle_detection_blocks_execution():
+    """Verify that dependency loop returns RECIPE_DEPENDENCY_CYCLE."""
+    import app.api.recipes
+    mock_catalog = {
+        "recipe-A": {"id": "recipe-A", "requires": ["recipe-B"]},
+        "recipe-B": {"id": "recipe-B", "requires": ["recipe-C"]},
+        "recipe-C": {"id": "recipe-C", "requires": ["recipe-A"]}
+    }
+    
+    original_catalog = app.api.recipes._CATALOG_BY_ID
+    app.api.recipes._CATALOG_BY_ID = mock_catalog
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            _resolve_execution_order(["recipe-A"])
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["type"] == "RECIPE_DEPENDENCY_CYCLE"
+        assert "recipe-A" in exc_info.value.detail["recipes"]
+    finally:
+        app.api.recipes._CATALOG_BY_ID = original_catalog
+
