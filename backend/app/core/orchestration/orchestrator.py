@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 
-from app.adapters.base import MigrationAdapter, adapter_registry
+from app.adapters.base import MigrationAdapter, adapter_registry, CSharpRoslynAdapter
 from app.adapters.java.adapter import JavaOpenRewriteAdapter
 from app.adapters.python.adapter import PythonRuffAdapter
 from app.adapters.typescript.adapter import TypeScriptAdapter
@@ -47,6 +47,7 @@ from app.discovery.scanner import UniversalScanner
 _ADAPTERS: list[MigrationAdapter] = [
     JavaOpenRewriteAdapter(),
     PythonRuffAdapter(),
+    CSharpRoslynAdapter(),    # C# Roslyn analyzer + AST file-scoped namespace modernization
     TypeScriptAdapter(),     # TypeScript-specific: var→let, require→import, ts-ignore fixes
     JavaScriptPrettierAdapter(),  # JS/TS formatting via Prettier
     HtmlModernizationAdapter(),
@@ -78,11 +79,13 @@ _EXT_TO_LANG: dict[str, set[str]] = {
     ".yaml":      {"yaml"}, ".yml": {"yaml"},
     ".md":        {"markdown"}, ".markdown": {"markdown"},
     ".java":      {"java"},
+    ".cs":        {"csharp"}, ".csproj": {"csharp"},
     ".go":        {"go"},
     ".php":       {"php"}, ".phtml": {"php"},
     ".sh":        {"shell"}, ".bash": {"shell"}, ".zsh": {"shell"},
-    ".c":         {"generic"}, ".cpp": {"generic"}, ".cs": {"generic"},
+    ".c":         {"generic"}, ".cpp": {"generic"},
     ".rs":        {"generic"}, ".kt": {"generic"}, ".swift": {"generic"},
+
     ".sql":       {"generic"}, ".toml": {"generic"}, ".xml": {"generic"},
 }
 

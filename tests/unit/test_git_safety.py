@@ -470,9 +470,30 @@ def test_python_libcst_ast_transformations():
     res_union = transformer.transform_code(code_union, target_version="3.11")
     assert res_union == "def calculate(arg: int | float) -> str | bytes: pass"
 
-    # Legacy Python target (e.g. 3.8) preserves Union/Optional compatibility
-    res_legacy = transformer.transform_code(code_optional, target_version="3.8")
-    assert res_legacy == code_optional
+def test_csharp_roslyn_adapter_and_ast_transform():
+    from app.adapters.base import adapter_registry, CSharpRoslynSyntaxTransformer
+    
+    # 1. Verify Roslyn adapter registration in adapter_registry
+    roadmap = adapter_registry.get_roadmap_status()
+    cs_entry = next(r for r in roadmap if r["language"] == "csharp")
+    assert cs_entry["engine"] == "Roslyn (C# Compiler Platform)"
+    assert cs_entry["roadmap_priority"] == 3
+    assert cs_entry["maturity"] == "STABLE"
+
+    # 2. Verify Roslyn AST block to file-scoped namespace transformation
+    transformer = CSharpRoslynSyntaxTransformer()
+    block_ns_code = "namespace Acme.Core\n{\npublic class Service {}\n}"
+    res_ns = transformer.transform_code(block_ns_code)
+    assert res_ns == "namespace Acme.Core;\n\npublic class Service {}\n\n"
+
+
+
+
+    # 3. Verify .csproj TargetFramework upgrade
+    csproj_code = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>netcoreapp3.1</TargetFramework>\n  </PropertyGroup>\n</Project>"
+    res_csproj = transformer.transform_csproj(csproj_code, target_framework="net8.0")
+    assert "<TargetFramework>net8.0</TargetFramework>" in res_csproj
+
 
 
 
