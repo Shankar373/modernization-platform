@@ -159,105 +159,59 @@ async def execute_migration(request: ExecuteRequest, db: AsyncSession = Depends(
         if not proj:
             raise HTTPException(status_code=404, detail="Project not found.")
         workspace_path = proj.workspace_path
-        plan = ModelMigrationPlan(
-            plan_id=db_plan.plan_id,
-            project_id=db_plan.project_id,
-            profile=db_plan.profile,
-            targets=db_plan.targets,
-            steps=db_plan.steps,
-            selected_capabilities=db_plan.selected_capabilities,
-            overall_risk=db_plan.overall_risk,
-            dry_run_available=db_plan.dry_run_available,
-            requires_approval=db_plan.requires_approval,
-        )
+        project_id = db_plan.project_id
+        profile_name = db_plan.profile
     else:
         plan_data = _plans.get(request.plan_id)
         if not plan_data:
             raise HTTPException(status_code=404, detail="Plan not found.")
         workspace_path = plan_data["workspace_path"]
-        plan = plan_data["plan"]
+        project_id = plan_data["plan"].project_id
+        profile_name = plan_data["plan"].profile.value
 
     try:
+        from datetime import datetime
+        result_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+
+        # Save QUEUED run to DB
+        await CRUDRepository.create_migration_run(
+            db=db,
+            result_id=result_id,
+            job_id=job_id,
+            project_id=project_id,
+            plan_id=request.plan_id,
+            status="QUEUED",
+            statistics={},
+            changed_files=[],
+            timeline=[{"step": "Queued in database", "status": "queued", "ts": datetime.utcnow().isoformat()}],
+            warnings=[],
+            manual_remediation=[],
+            logs={},
+        )
+
         # Create stage status
         await CRUDRepository.create_migration_stage(
             db=db,
-            project_id=plan.project_id,
+            project_id=project_id,
+            run_id=result_id,
             stage_name="TRANSFORMATION",
-            status="RUNNING",
+            status="QUEUED",
         )
 
-        # Run blocking migration in a thread so the event loop stays free (fixes WinError 64)
-        result = await asyncio.to_thread(
-            _orchestrator.migrate,
-            workspace_path,
-            plan,
-        )
+        # Submit background task
+        from app.workers.migration_tasks import run_migration_task
+        run_migration_task.delay(result_id, workspace_path, request.plan_id, project_id, profile_name)
 
-        # Save result to DB
-        await CRUDRepository.create_migration_run(
-            db=db,
-            result_id=result.result_id,
-            job_id=result.job_id,
-            project_id=result.project_id,
-            plan_id=result.plan_id,
-            status=result.status.value,
-            statistics=result.statistics.model_dump(),
-            changed_files=[f.model_dump() for f in result.changed_files],
-            timeline=result.timeline,
-            warnings=result.warnings,
-            manual_remediation=result.manual_remediation,
-            logs=result.logs,
-            output_bundle_path=result.output_bundle_path,
-        )
-
-        # Complete stage status
-        await CRUDRepository.create_migration_stage(
-            db=db,
-            project_id=plan.project_id,
-            run_id=result.result_id,
-            stage_name="TRANSFORMATION",
-            status=result.status.value,
-            logs=str(result.logs),
-        )
-
-        # Create BuildResult entry
-        await CRUDRepository.create_build_result(
-            db=db,
-            run_id=result.result_id,
-            success=result.statistics.build_passed if result.statistics.build_passed is not None else True,
-            command="build",
-            output=result.logs.get("validation", ""),
-        )
-
-        # Create TestResult entry
-        await CRUDRepository.create_test_result(
-            db=db,
-            run_id=result.result_id,
-            success=result.statistics.tests_failed == 0 if result.statistics.tests_total > 0 else True,
-            command="test",
-            total_tests=result.statistics.tests_total,
-            passed_tests=result.statistics.tests_passed,
-            failed_tests=result.statistics.tests_failed,
-            output=result.logs.get("validation", ""),
-        )
-
-        # Save to local cache
-        _results[result.result_id] = {"result": result, "plan_data": {"workspace_path": workspace_path, "plan": plan}}
-        return result.model_dump()
+        return {
+            "result_id": result_id,
+            "job_id": job_id,
+            "project_id": project_id,
+            "plan_id": request.plan_id,
+            "status": "QUEUED",
+        }
     except Exception as e:
-        # Create error log entry
-        try:
-            await CRUDRepository.create_migration_error(
-                db=db,
-                run_id=result.result_id if 'result' in locals() else str(uuid.uuid4()),
-                stage="TRANSFORMATION",
-                error_type=type(e).__name__,
-                message=str(e),
-                traceback=traceback.format_exc(),
-            )
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=f"Migration failed: {e}\n{traceback.format_exc()[:800]}")
+        raise HTTPException(status_code=500, detail=f"Migration queueing failed: {e}\n{traceback.format_exc()[:800]}")
 
 
 @router.post("/migration/dry-run-all")
@@ -287,7 +241,7 @@ async def dry_run_all(request: DryRunAllRequest):
 
 
 @router.post("/migration/approve-execute")
-async def approve_and_execute(request: ApproveAndExecuteRequest):
+async def approve_and_execute(request: ApproveAndExecuteRequest, db: AsyncSession = Depends(get_db)):
     """
     User accepted the dry-run preview — now execute the full migration.
     Runs all adapters in parallel (same as migrate-all) and stores the result.
@@ -296,58 +250,105 @@ async def approve_and_execute(request: ApproveAndExecuteRequest):
     if not request.approved:
         raise HTTPException(status_code=400, detail="Execution requires explicit approval (approved=true).")
     try:
-        result = await asyncio.to_thread(
-            _orchestrator.migrate_all,
-            request.workspace_path,
-            request.project_id,
-            request.migration_profile,
+        result_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        plan_id = f"all-{result_id}"
+
+        # Save QUEUED run to database
+        await CRUDRepository.create_migration_run(
+            db=db,
+            result_id=result_id,
+            job_id=job_id,
+            project_id=request.project_id,
+            plan_id=plan_id,
+            status="QUEUED",
+            statistics={},
+            changed_files=[],
+            timeline=[{"step": "Queued in database", "status": "queued", "ts": datetime.utcnow().isoformat()}],
+            warnings=[],
+            manual_remediation=[],
+            logs={},
         )
-        _results[result.result_id] = {
-            "result": result,
-            "plan_data": {
-                "workspace_path": request.workspace_path,
-                "plan": None,
-            },
-        }
+
+        # Create QUEUED stage status
+        await CRUDRepository.create_migration_stage(
+            db=db,
+            project_id=request.project_id,
+            run_id=result_id,
+            stage_name="TRANSFORMATION",
+            status="QUEUED",
+        )
+
         # Clean up the dry-run cache
         _dry_run_all_results.pop(request.project_id, None)
-        return result.model_dump()
+
+        # Trigger background task
+        from app.workers.migration_tasks import run_migration_task
+        run_migration_task.delay(result_id, request.workspace_path, plan_id, request.project_id, request.migration_profile.value)
+
+        return {
+            "result_id": result_id,
+            "job_id": job_id,
+            "project_id": request.project_id,
+            "plan_id": plan_id,
+            "status": "QUEUED",
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Approved execution failed: {e}\n{traceback.format_exc()[:1200]}"
+            detail=f"Approved execution queuing failed: {e}\n{traceback.format_exc()[:1200]}"
         )
 
 
 @router.post("/migration/migrate-all")
-async def migrate_all(request: MigrateAllRequest):
+async def migrate_all(request: MigrateAllRequest, db: AsyncSession = Depends(get_db)):
     """
     Full-application migration — auto-detects ALL languages and runs every
     applicable adapter (Python/ruff, HTML, CSS, JS/prettier, JSON, YAML, Markdown).
-    Runs in a background thread via asyncio.to_thread() so the event loop
-    stays unblocked (prevents WinError 64 / connection reset on Windows).
     """
     try:
-        # ── Key fix: run the blocking sync function OFF the event loop thread ──
-        # migrate_all() internally uses ThreadPoolExecutor; calling it directly
-        # from an async handler blocks the ProactorEventLoop on Windows and
-        # causes WinError 64 / connection resets.
-        result = await asyncio.to_thread(
-            _orchestrator.migrate_all,
-            request.workspace_path,
-            request.project_id,
-            request.migration_profile,
+        result_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        plan_id = f"all-{result_id}"
+
+        # Save QUEUED run to database
+        await CRUDRepository.create_migration_run(
+            db=db,
+            result_id=result_id,
+            job_id=job_id,
+            project_id=request.project_id,
+            plan_id=plan_id,
+            status="QUEUED",
+            statistics={},
+            changed_files=[],
+            timeline=[{"step": "Queued in database", "status": "queued", "ts": datetime.utcnow().isoformat()}],
+            warnings=[],
+            manual_remediation=[],
+            logs={},
         )
-        _results[result.result_id] = {
-            "result": result,
-            "plan_data": {
-                "workspace_path": request.workspace_path,
-                "plan": None,
-            },
+
+        # Create QUEUED stage status
+        await CRUDRepository.create_migration_stage(
+            db=db,
+            project_id=request.project_id,
+            run_id=result_id,
+            stage_name="TRANSFORMATION",
+            status="QUEUED",
+        )
+
+        # Trigger background task
+        from app.workers.migration_tasks import run_migration_task
+        run_migration_task.delay(result_id, request.workspace_path, plan_id, request.project_id, request.migration_profile.value)
+
+        return {
+            "result_id": result_id,
+            "job_id": job_id,
+            "project_id": request.project_id,
+            "plan_id": plan_id,
+            "status": "QUEUED",
         }
-        return result.model_dump()
     except Exception as e:
-        detail = f"Full-app migration failed: {e}\n{traceback.format_exc()[:1200]}"
+        detail = f"Full-app migration queueing failed: {e}\n{traceback.format_exc()[:1200]}"
         raise HTTPException(status_code=500, detail=detail)
 
 
