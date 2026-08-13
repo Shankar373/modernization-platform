@@ -6,12 +6,6 @@ A production-grade Enterprise Application Modernization Platform built under the
 
 ---
 
-## 📖 Project Demonstration & Architecture Guide
-
-For a full step-by-step demonstration walkthrough, tech stack breakdown, and operational guide, see **[DEMO.md](DEMO.md)**.
-
----
-
 ## 🌐 12-Step Migration Pipeline Architecture
 
 ```text
