@@ -107,7 +107,8 @@ In a new terminal:
 ```bash
 cd backend
 .venv\Scripts\activate
-celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+celery -A app.workers.celery_app worker --loglevel=info --pool=solo
+
 ```
 
 ### 4. Frontend Setup
