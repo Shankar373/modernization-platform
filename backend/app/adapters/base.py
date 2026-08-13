@@ -15,12 +15,20 @@ def is_ignored_path(path: Path) -> bool:
     return False
 
 from app.core.domain.models import (
+    CapabilityStatus,
     MigrationCapability,
     MigrationPlan,
     MigrationProfile,
     MigrationResult,
+    MigrationStatistics,
+    MigrationStatus,
+    MigrationTarget,
+    PlanStep,
+    RiskLevel,
     TechnologyProfile,
 )
+
+
 
 
 class AnalysisResult:
@@ -341,13 +349,14 @@ class CSharpRoslynAdapter(MigrationAdapter):
                 name="csharp-modernization",
                 language="csharp",
                 provider="roslyn",
-                status=CapabilityStatus.AVAILABLE if has_dotnet else CapabilityStatus.PARTIALLY_AVAILABLE,
+                status=CapabilityStatus.AVAILABLE if has_dotnet else CapabilityStatus.PARTIAL,
                 source_versions=[".NET Framework 4.x", ".NET Core 3.1", ".NET 5.0", ".NET 6.0"],
                 target_versions=[".NET 8.0", ".NET 9.0"],
                 risk=RiskLevel.LOW,
                 description="C# code modernization with Roslyn analyzers & dotnet format",
                 notes="" if has_dotnet else "dotnet CLI not found on host — using Roslyn AST normalizer",
             ),
+
             MigrationCapability(
                 name="csharp-roslyn-ast",
                 language="csharp",

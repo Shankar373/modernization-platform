@@ -40,6 +40,10 @@ from app.core.domain.models import (
 )
 from app.discovery.scanner import UniversalScanner
 
+if not hasattr(CapabilityStatus, "PARTIALLY_AVAILABLE"):
+    setattr(CapabilityStatus, "PARTIALLY_AVAILABLE", CapabilityStatus.PARTIAL)
+
+
 
 # ── Adapter Registry & Dynamic Discovery ─────────────────────────────────────
 # All language connectors register here for automatic execution during migrations.
@@ -62,6 +66,12 @@ _ADAPTERS: list[MigrationAdapter] = [
 ]
 
 adapter_registry.register_all(_ADAPTERS)
+
+# Register live adapter capabilities into global capability registry
+for adapter in _ADAPTERS:
+    for cap in adapter.get_capabilities():
+        registry.register(cap)
+
 
 
 _SKIP_SCAN_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git",
