@@ -39,6 +39,9 @@ async def test_celery_redis_integration_flow():
         return
 
     # 2. Run integration test
+    from app.db.session import init_db
+    await init_db()  # ensure tables exist (SQLite dev fallback and PostgreSQL alike)
+
     async with AsyncSessionLocal() as session:
         project_id = str(uuid.uuid4())
         plan_id = str(uuid.uuid4())

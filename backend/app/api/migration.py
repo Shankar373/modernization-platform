@@ -641,7 +641,7 @@ async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
             "files_unchanged": stats.get("files_unchanged", 0),
             "files_added": 0,
             "files_deleted": 0,
-            "transformation_engine": "OpenRewrite" if "java" in [l.lower() for l in (db_profile.languages if db_profile else [])] else "Ruff",
+            "transformation_engine": "OpenRewrite" if "java" in [str(l.get("name", l) if isinstance(l, dict) else l).lower() for l in (db_profile.languages if db_profile else [])] else "Ruff",
             "transformation_duration": next((s["duration"] for s in stages_data if s["name"] == "TRANSFORMATION"), "0.0s")
         },
         "build": build_data,

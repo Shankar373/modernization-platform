@@ -23,7 +23,9 @@ _KNOWN_EXTS = {
     ".py", ".java", ".html", ".htm", ".css", ".scss", ".sass",
     ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
     ".json", ".yaml", ".yml", ".md", ".markdown",
-    ".go", ".php", ".sh", ".bash", ".zsh"
+    ".go", ".php", ".sh", ".bash", ".zsh",
+    ".cs", ".csproj", ".sln", ".xaml", ".vb",  # .NET/C# adapters
+    ".xml", ".pom",  # java/openrewrite (pom.xml) + .NET configs
 }
 
 # Supported generic code / text extensions

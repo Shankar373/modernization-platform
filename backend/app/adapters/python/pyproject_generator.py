@@ -75,7 +75,16 @@ class PyprojectGenerator:
         config["tool"]["ruff"] = ruff_config
 
         out = output_path or str(ws / "pyproject.toml")
-        with open(out, "w", encoding="utf-8") as f:
-            toml.dump(config, f)
+        out_name = Path(out).name.lower()
+
+        if out_name == "pyproject.toml":
+            # pyproject.toml requires the [tool.ruff] namespace wrapper
+            with open(out, "w", encoding="utf-8") as f:
+                toml.dump(config, f)
+        else:
+            # Standalone ruff config file (ruff.toml / .ruff.toml) must have
+            # top-level keys — ruff rejects the [tool.ruff] wrapper there.
+            with open(out, "w", encoding="utf-8") as f:
+                toml.dump(ruff_config, f)
 
         return out

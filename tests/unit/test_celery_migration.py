@@ -31,6 +31,11 @@ def test_migration_task_execution(mock_orch, mock_crud):
     mock_run.project_id = project_id
     mock_crud.get_migration_run = AsyncMock(return_value=mock_run)
 
+    # Mock project profile row (used by unsupported-language detection)
+    mock_profile = MagicMock()
+    mock_profile.languages = ["Python"]
+    mock_crud.get_project_profile = AsyncMock(return_value=mock_profile)
+
     # Mock DB plan row
     mock_plan = MagicMock()
     mock_plan.plan_id = plan_id

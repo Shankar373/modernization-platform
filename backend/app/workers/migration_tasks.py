@@ -57,10 +57,20 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
             # Determine Worker Type and reject unsupported projects
             db_profile = await CRUDRepository.get_project_profile(db, db_run.project_id)
             languages = db_profile.languages if db_profile else []
-            langs_lower = [l.lower() for l in languages]
+            langs_lower = []
+            for l in languages:
+                if isinstance(l, dict):
+                    langs_lower.append(str(l.get("name", "")).lower())
+                elif isinstance(l, str):
+                    langs_lower.append(l.lower())
+                else:
+                    langs_lower.append(str(l).lower())
             
             # Identify unsupported languages explicitly
-            unsupported_langs = {"go", "php", "cpp", "c", "dotnet"}
+            # Only block languages that have NO registered adapter:
+            # the generic fallback adapter covers C/C++/Kotlin/Rust/Swift/SQL;
+            # dedicated adapters exist for go, php, csharp, java, python, node, etc.
+            unsupported_langs = {"ruby", "cobol", "fortran", "pascal", "vbnet"}
             detected_unsupported = set(langs_lower) & unsupported_langs
 
             # Update status to RUNNING
@@ -142,6 +152,8 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                 worker_type = "Python Worker"
             elif any(l in ["javascript", "typescript", "nodejs"] for l in langs_lower):
                 worker_type = "Node Worker"
+            elif any(l in ["csharp", "c#", "dotnet"] for l in langs_lower):
+                worker_type = "C# Roslyn Worker"
 
             print(f"[Celery] Selected Worker: {worker_type} for run {result_id}")
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getResult, getReport, downloadModernizedZip } from '../api/client';
-import type { MigrationResult, MigrationReport, FileChangeMetadata, MigrationStatistics } from '../types';
+import type { MigrationResult, FileChangeMetadata, MigrationStatistics } from '../types';
 
 const STATUS_BANNER: Record<string, { cls: string; icon: string }> = {
   SUCCESS:              { cls: 'success',    icon: '✅' },
@@ -88,16 +88,14 @@ export default function Results() {
   const { resultId } = useParams<{ resultId: string }>();
   const navigate = useNavigate();
   const [result, setResult]   = useState<MigrationResult | null>(null);
-  const [report, setReport]   = useState<MigrationReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
 
   useEffect(() => {
     if (!resultId) return;
     Promise.all([getResult(resultId), getReport(resultId)])
-      .then(([rRes, rpRes]) => {
+      .then(([rRes]) => {
         setResult(rRes.data as MigrationResult);
-        setReport(rpRes.data as MigrationReport);
       })
       .catch(() => {
         const cached = sessionStorage.getItem(`result_${resultId}`);

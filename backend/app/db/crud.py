@@ -1,4 +1,5 @@
 """Database CRUD operations for Phase 1 persistence."""
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession

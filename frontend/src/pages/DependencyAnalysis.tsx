@@ -200,7 +200,7 @@ export default function DependencyAnalysisPage() {
             <span style={{ fontWeight: 600, fontSize: '1.05rem' }}>Analyzing dependencies...</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
-            {['Detecting dependency files', 'Parsing dependency declarations', 'Querying package registries (PyPI · npm · Maven Central)', 'Comparing versions & checking constraints', 'Applying safe updates'].map((step, i) => (
+            {['Detecting dependency files', 'Parsing dependency declarations', 'Querying package registries (PyPI · npm · Maven Central)', 'Comparing versions & checking constraints', 'Applying safe updates'].map((step) => (
               <div key={step} className="flex items-center gap-2">
                 <span className="spinner" style={{ width: 12, height: 12, opacity: 0.6 }} />
                 {step}

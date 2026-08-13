@@ -95,8 +95,6 @@ export default function Analysis() {
 
   // Integrated Dependency Analysis State
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
-  const [dependencyUpdatedFiles, setDependencyUpdatedFiles] = useState<string[]>([]);
-  const [dependenciesLoading, setDependenciesLoading] = useState(false);
 
   // Single-language advanced builder
   const [selectedLang, setSelectedLang]     = useState('');
@@ -119,7 +117,6 @@ export default function Analysis() {
     setDryRunError('');
     setPreview(null);
     setDependencies([]);
-    setDependenciesLoading(true);
 
     try {
       // Run both codebase modernization dry run and dependency analysis in parallel
@@ -134,8 +131,6 @@ export default function Analysis() {
     } catch (e: any) {
       setDryRunError(e?.response?.data?.detail || 'Dry run failed. Please try again.');
       setStage('analysis');
-    } finally {
-      setDependenciesLoading(false);
     }
   };
 

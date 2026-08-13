@@ -803,7 +803,22 @@ class MigrationOrchestrator:
         applicable_adapters = self.get_applicable_adapters(workspace_path)
         supported_languages = {a.language for a in applicable_adapters}
 
-        detected_languages = [l.name.lower() for l in profile.languages]
+        # Normalize scanner language names to adapter language keys.
+        _LANG_ALIASES = {
+            "c#": "csharp", "vb.net": "csharp", "f#": "csharp",
+            "c": "generic", "c++": "generic", "cpp": "generic", "cxx": "generic",
+            "kotlin": "generic", "swift": "generic", "rust": "generic", "rs": "generic",
+            "sql": "generic", "obj-c": "generic", "objective-c": "generic",
+            "js": "javascript", "node": "javascript", "nodejs": "javascript",
+            "ts": "typescript", "cobol": "cobol", "ruby": "ruby", "r": "generic",
+            "lua": "generic", "fortran": "generic", "pascal": "generic",
+        }
+
+        detected_languages = []
+        for lang in [l.name for l in profile.languages]:
+            key = lang.lower().strip()
+            detected_languages.append(_LANG_ALIASES.get(key, key))
+
         unsupported = [
             lang for lang in detected_languages
             if lang not in supported_languages
