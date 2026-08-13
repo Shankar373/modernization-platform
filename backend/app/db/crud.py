@@ -358,6 +358,11 @@ class CRUDRepository:
         await db.refresh(db_build)
         return db_build
 
+    @staticmethod
+    async def get_build_result(db: AsyncSession, run_id: str) -> Optional[DBBuildResult]:
+        result = await db.execute(select(DBBuildResult).filter(DBBuildResult.run_id == run_id))
+        return result.scalars().first()
+
     # ── TestResult ────────────────────────────────────────────────────────────
     @staticmethod
     async def create_test_result(
@@ -384,6 +389,11 @@ class CRUDRepository:
         await db.refresh(db_test)
         return db_test
 
+    @staticmethod
+    async def get_test_result(db: AsyncSession, run_id: str) -> Optional[DBTestResult]:
+        result = await db.execute(select(DBTestResult).filter(DBTestResult.run_id == run_id))
+        return result.scalars().first()
+
     # ── MigrationError ────────────────────────────────────────────────────────
     @staticmethod
     async def create_migration_error(
@@ -406,6 +416,11 @@ class CRUDRepository:
         await db.refresh(db_err)
         return db_err
 
+    @staticmethod
+    async def get_migration_error(db: AsyncSession, run_id: str) -> Optional[DBMigrationError]:
+        result = await db.execute(select(DBMigrationError).filter(DBMigrationError.run_id == run_id))
+        return result.scalars().first()
+
     # ── MigrationReport ───────────────────────────────────────────────────────
     @staticmethod
     async def create_migration_report(
@@ -425,3 +440,9 @@ class CRUDRepository:
         await db.commit()
         await db.refresh(db_rep)
         return db_rep
+
+    @staticmethod
+    async def get_migration_report(db: AsyncSession, run_id: str) -> Optional[DBMigrationReport]:
+        result = await db.execute(select(DBMigrationReport).filter(DBMigrationReport.run_id == run_id))
+        return result.scalars().first()
+

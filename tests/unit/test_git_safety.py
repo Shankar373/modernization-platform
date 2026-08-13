@@ -365,3 +365,68 @@ def test_env_secrets_stripping(tmp_path):
     assert "REDIS_URL" not in stdout_keys
 
 
+# ── Phase 7 Verification Reporting & Stage Metrics Tests ───────────────────────
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+@pytest.mark.asyncio
+async def test_report_endpoint_generation():
+    """Verify that report endpoint queries real tables and returns correct metrics layout."""
+    result_id = "test-report-run-id"
+    project_id = "test-proj-id"
+    
+    mock_run = MagicMock()
+    mock_run.result_id = result_id
+    mock_run.project_id = project_id
+    mock_run.plan_id = "plan-123"
+    mock_run.status = "SUCCESS"
+    mock_run.statistics = {"files_scanned": 10, "files_modified": 2, "files_unchanged": 8}
+    mock_run.changed_files = []
+    mock_run.timeline = []
+    
+    mock_proj = MagicMock()
+    mock_proj.project_id = project_id
+    mock_proj.name = "My Test Project"
+    mock_proj.source_type = "git"
+    mock_proj.workspace_path = "/tmp/ws"
+    
+    mock_stage = MagicMock()
+    mock_stage.stage_name = "TRANSFORMATION"
+    mock_stage.status = "SUCCESS"
+    mock_stage.duration = 10.5
+    mock_stage.progress = 100
+    mock_stage.message = "All code updated"
+    mock_stage.error_information = None
+    
+    with patch.object(CRUDRepository, "get_migration_run", AsyncMock(return_value=mock_run)), \
+         patch.object(CRUDRepository, "get_project", AsyncMock(return_value=mock_proj)), \
+         patch.object(CRUDRepository, "get_project_profile", AsyncMock(return_value=None)), \
+         patch.object(CRUDRepository, "get_migration_plan", AsyncMock(return_value=None)), \
+         patch.object(CRUDRepository, "get_migration_stages", AsyncMock(return_value=[mock_stage])), \
+         patch.object(CRUDRepository, "get_migration_checkpoints", AsyncMock(return_value=[])), \
+         patch.object(CRUDRepository, "get_build_result", AsyncMock(return_value=None)), \
+         patch.object(CRUDRepository, "get_test_result", AsyncMock(return_value=None)), \
+         patch.object(CRUDRepository, "get_migration_error", AsyncMock(return_value=None)), \
+         patch.object(CRUDRepository, "create_migration_report", AsyncMock()):
+         
+        response = client.get(f"/api/v1/migration/result/{result_id}/report")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["run_id"] == result_id
+
+        assert data["final_status"] == "SUCCESS"
+        
+        # Check overall summary metrics
+        assert data["summary"]["total_duration"] == "10.5s"
+        assert data["summary"]["successful_stages"] == 1
+        
+        # Check QUALITY/SECURITY skipped visibility
+        stages = data["stages"]
+        quality_stage = next(s for s in stages if s["name"] == "QUALITY")
+        assert quality_stage["status"] == "SKIPPED"
+        assert quality_stage["message"] == "Not Implemented"
+
+
+
