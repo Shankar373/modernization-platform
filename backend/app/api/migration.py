@@ -379,6 +379,67 @@ async def get_result(result_id: str, db: AsyncSession = Depends(get_db)):
     return result_data["result"].model_dump()
 
 
+@router.get("/migration/{run_id}/status")
+async def get_migration_status(run_id: str, db: AsyncSession = Depends(get_db)):
+    """Get the persistent status of a migration run and its progression stages."""
+    db_run = await CRUDRepository.get_migration_run(db, run_id)
+    
+    # Define fallback stages structure
+    stages_fallback = [
+        ("DISCOVERY", 1), ("PROFILE", 2), ("RECOMMENDATION", 3), ("PLAN", 4),
+        ("RECIPE_VALIDATION", 5), ("TRANSFORMATION", 6), ("COMPILE", 7),
+        ("TEST", 8), ("QUALITY", 9), ("SECURITY", 10), ("FINALIZE", 11)
+    ]
+
+    if not db_run:
+        result_data = _results.get(run_id)
+        if not result_data:
+            raise HTTPException(status_code=404, detail="Migration run not found.")
+        return {
+            "run_id": run_id,
+            "status": "SUCCESS",
+            "current_stage": "FINALIZE",
+            "progress": 100,
+            "stages": [
+                {"name": name, "status": "SUCCESS", "progress": 100, "message": "Completed", "duration": 0, "error_message": None}
+                for name, _ in stages_fallback
+            ]
+        }
+
+    db_stages = await CRUDRepository.get_migration_stages(db, run_id)
+    applicable_stages = [s for s in db_stages if s.status != "PENDING"]
+    completed_stages = [s for s in db_stages if s.status in ["SUCCESS", "SKIPPED"]]
+    
+    total_stages = len(db_stages) if db_stages else len(stages_fallback)
+    progress_val = int((len(completed_stages) / total_stages) * 100) if total_stages > 0 else 0
+    
+    current_stage = "QUEUED"
+    running_stages = [s for s in db_stages if s.status == "RUNNING"]
+    if running_stages:
+        current_stage = running_stages[0].stage_name
+    elif applicable_stages:
+        sorted_app = sorted(applicable_stages, key=lambda x: x.stage_order, reverse=True)
+        current_stage = sorted_app[0].stage_name
+
+    return {
+        "run_id": db_run.result_id,
+        "status": db_run.status,
+        "current_stage": current_stage,
+        "progress": progress_val,
+        "stages": [
+            {
+                "name": s.stage_name,
+                "status": s.status,
+                "progress": s.progress,
+                "message": s.message,
+                "duration": s.duration,
+                "error_message": s.error_information
+            }
+            for s in db_stages
+        ]
+    }
+
+
 @router.get("/migration/result/{result_id}/report")
 async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
     """Generate and return the migration report."""

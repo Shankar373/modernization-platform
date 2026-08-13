@@ -190,23 +190,72 @@ class CRUDRepository:
         stage_name: str,
         status: str,
         run_id: Optional[str] = None,
+        stage_order: int = 0,
+        duration: int = 0,
+        progress: int = 0,
+        message: Optional[str] = None,
         logs: Optional[str] = None,
         structured_results: Optional[Dict[str, Any]] = None,
         error_information: Optional[str] = None,
     ) -> DBMigrationStage:
-        db_stage = DBMigrationStage(
-            project_id=project_id,
-            run_id=run_id,
-            stage_name=stage_name,
-            status=status,
-            logs=logs,
-            structured_results=structured_results,
-            error_information=error_information,
-        )
-        db.add(db_stage)
+        # Check if stage already exists for this run_id and name
+        db_stage = None
+        if run_id:
+            result = await db.execute(
+                select(DBMigrationStage).filter(
+                    DBMigrationStage.run_id == run_id,
+                    DBMigrationStage.stage_name == stage_name
+                )
+            )
+            db_stage = result.scalars().first()
+
+        if db_stage:
+            db_stage.status = status
+            if logs is not None:
+                db_stage.logs = logs
+            if structured_results is not None:
+                db_stage.structured_results = structured_results
+            if error_information is not None:
+                db_stage.error_information = error_information
+            if stage_order != 0:
+                db_stage.stage_order = stage_order
+            if duration != 0:
+                db_stage.duration = duration
+            if progress != 0:
+                db_stage.progress = progress
+            if message is not None:
+                db_stage.message = message
+            if status in ["SUCCESS", "FAILED"] and db_stage.start_time:
+                db_stage.end_time = datetime.utcnow()
+                db_stage.duration = int((db_stage.end_time - db_stage.start_time).total_seconds())
+        else:
+            db_stage = DBMigrationStage(
+                project_id=project_id,
+                run_id=run_id,
+                stage_name=stage_name,
+                stage_order=stage_order,
+                status=status,
+                duration=duration,
+                progress=progress,
+                message=message,
+                logs=logs,
+                structured_results=structured_results,
+                error_information=error_information,
+            )
+            db.add(db_stage)
+
         await db.commit()
         await db.refresh(db_stage)
         return db_stage
+
+    @staticmethod
+    async def get_migration_stages(db: AsyncSession, run_id: str) -> List[DBMigrationStage]:
+        result = await db.execute(
+            select(DBMigrationStage)
+            .filter(DBMigrationStage.run_id == run_id)
+            .order_by(DBMigrationStage.stage_order.asc())
+        )
+        return list(result.scalars().all())
 
     # ── MigrationCheckpoint ───────────────────────────────────────────────────
     @staticmethod
