@@ -744,3 +744,71 @@ class TestEndToEnd:
         assert dep.ecosystem == DependencyEcosystem.DOTNET
         assert dep.project_name == "AForge.Wpf"
 
+
+    def test_csharp_dependency_updaters(self, tmp_path):
+        from app.dependency_analysis.service import update_packages_config, update_csproj
+        from app.dependency_analysis.models import Dependency, DependencyStatus, DependencyEcosystem
+
+        updates = [
+            Dependency(
+                name="AForge",
+                current_version="2.2.5",
+                latest_stable_version="2.2.6",
+                source_file="packages.config",
+                ecosystem=DependencyEcosystem.DOTNET,
+                status=DependencyStatus.UPDATE_AVAILABLE,
+                update_required=True
+            ),
+            Dependency(
+                name="AForge.Imaging",
+                current_version="2.2.5",
+                latest_stable_version="2.2.6",
+                source_file="MyProj.csproj",
+                ecosystem=DependencyEcosystem.DOTNET,
+                status=DependencyStatus.UPDATE_AVAILABLE,
+                update_required=True
+            ),
+            Dependency(
+                name="EntityFramework",
+                current_version="6.4.4",
+                latest_stable_version="6.5.0",
+                source_file="MyProj.csproj",
+                ecosystem=DependencyEcosystem.DOTNET,
+                status=DependencyStatus.UPDATE_AVAILABLE,
+                update_required=True
+            )
+        ]
+
+        # 1. Test update_packages_config
+        pkg_config = tmp_path / "packages.config"
+        pkg_config.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<packages>
+  <package id="AForge" version="2.2.5" targetFramework="net452" />
+  <package id="Unrelated" version="1.0.0" />
+</packages>""", encoding="utf-8")
+
+        changed = update_packages_config(str(pkg_config), updates)
+        assert changed is True
+        content = pkg_config.read_text()
+        assert 'id="AForge" version="2.2.6"' in content
+        assert 'id="Unrelated" version="1.0.0"' in content
+
+        # 2. Test update_csproj (PackageReference and HintPath)
+        csproj = tmp_path / "MyProj.csproj"
+        csproj.write_text("""<Project ToolsVersion="14.0" DefaultTargets="Build">
+  <ItemGroup>
+    <PackageReference Include="EntityFramework" Version="6.4.4" />
+    <Reference Include="AForge.Imaging, Version=2.2.5.0">
+      <HintPath>..\\packages\\AForge.Imaging.2.2.5\\lib\\AForge.Imaging.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        changed2 = update_csproj(str(csproj), updates)
+        assert changed2 is True
+        csproj_content = csproj.read_text()
+        assert 'Include="EntityFramework" Version="6.5.0"' in csproj_content
+        assert 'Include="AForge.Imaging, Version=2.2.6.0"' in csproj_content
+        assert 'packages\\AForge.Imaging.2.2.6\\lib' in csproj_content
+
+

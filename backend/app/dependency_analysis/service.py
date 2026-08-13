@@ -246,6 +246,12 @@ class DependencyAnalysisService:
             elif name == "package.json":
                 file_changed = update_package_json(abs_path, deps)
 
+            elif name == "packages.config":
+                file_changed = update_packages_config(abs_path, deps)
+
+            elif name.endswith(".csproj"):
+                file_changed = update_csproj(abs_path, deps)
+
             # pyproject.toml / pom.xml / setup.cfg updates not yet implemented
             # (no unsafe text replacement on complex formats)
 
@@ -253,6 +259,220 @@ class DependencyAnalysisService:
                 changed.append(rel_path)
 
         return changed
+
+
+def update_packages_config(
+    file_path: str,
+    updates: List[Dependency],
+) -> bool:
+    """Apply dependency updates to a packages.config NuGet definition file."""
+    path = Path(file_path)
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    update_map = {
+        dep.name.lower(): dep.latest_stable_version
+        for dep in updates
+        if dep.status == DependencyStatus.UPDATE_AVAILABLE
+        and dep.update_required
+        and dep.latest_stable_version
+    }
+
+    if not update_map:
+        return False
+
+    changed = False
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = re.search(r'<package\s+([^>]+?)/?>', line, re.IGNORECASE)
+        if not m:
+            continue
+        attrs_str = m.group(1)
+        attrs = dict(re.findall(r'([\w\-.:]+)\s*=\s*[\'"]([^\'"]+)[\'"]', attrs_str))
+        pkg_id = attrs.get("id")
+        if pkg_id and pkg_id.lower() in update_map:
+            new_ver = update_map[pkg_id.lower()]
+            old_ver = attrs.get("version")
+            if old_ver and old_ver != new_ver:
+                escaped_old_ver = re.escape(old_ver)
+                new_line = re.sub(
+                    rf'version\s*=\s*[\'"]{escaped_old_ver}[\'"]',
+                    f'version="{new_ver}"',
+                    line,
+                    flags=re.IGNORECASE
+                )
+                if new_line != line:
+                    lines[i] = new_line
+                    changed = True
+
+    if changed:
+        path.write_text("".join(lines), encoding="utf-8")
+
+    return changed
+
+
+def update_csproj(
+    file_path: str,
+    updates: List[Dependency],
+) -> bool:
+    """Apply dependency updates to a .csproj NuGet references (PackageReference + HintPath)."""
+    path = Path(file_path)
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    update_map = {
+        dep.name.lower(): dep.latest_stable_version
+        for dep in updates
+        if dep.status == DependencyStatus.UPDATE_AVAILABLE
+        and dep.update_required
+        and dep.latest_stable_version
+    }
+
+    if not update_map:
+        return False
+
+    changed = False
+    lines = content.splitlines(keepends=True)
+
+    # 1. Update PackageReference tags
+    for i, line in enumerate(lines):
+        m = re.search(r'<PackageReference\s+([^>]+?)/?>', line, re.IGNORECASE)
+        if m:
+            attrs_str = m.group(1)
+            attrs = dict(re.findall(r'([\w\-.:]+)\s*=\s*[\'"]([^\'"]+)[\'"]', attrs_str))
+            name = attrs.get("Include") or attrs.get("Update")
+            if name and name.lower() in update_map:
+                new_ver = update_map[name.lower()]
+                old_ver = attrs.get("Version")
+                if old_ver and old_ver != new_ver:
+                    escaped_old = re.escape(old_ver)
+                    new_line = re.sub(
+                        rf'Version\s*=\s*[\'"]{escaped_old}[\'"]',
+                        f'Version="{new_ver}"',
+                        line,
+                        flags=re.IGNORECASE
+                    )
+                    if new_line != line:
+                        lines[i] = new_line
+                        changed = True
+            continue
+
+        v_match = re.search(r'<Version>\s*(.*?)\s*</Version>', line, re.IGNORECASE)
+        if v_match:
+            old_ver = v_match.group(1).strip()
+            pkg_name = None
+            for idx in range(max(0, i - 5), i):
+                m_prev = re.search(r'<PackageReference\s+([^>]+?)>', lines[idx], re.IGNORECASE)
+                if m_prev:
+                    prev_attrs = dict(re.findall(r'([\w\-.:]+)\s*=\s*[\'"]([^\'"]+)[\'"]', m_prev.group(1)))
+                    pkg_name = prev_attrs.get("Include") or prev_attrs.get("Update")
+                    break
+
+            if pkg_name and pkg_name.lower() in update_map:
+                new_ver = update_map[pkg_name.lower()]
+                if old_ver != new_ver:
+                    new_line = re.sub(
+                        r'(<Version>)\s*.*?\s*(</Version>)',
+                        f'\\1{new_ver}\\2',
+                        line,
+                        flags=re.IGNORECASE
+                    )
+                    if new_line != line:
+                        lines[i] = new_line
+                        changed = True
+
+    # 2. Update legacy HintPath & Reference Include versions
+    content_str = "".join(lines)
+
+    def replace_reference(match):
+        nonlocal changed
+        full_block = match.group(0)
+        attrs_str = match.group(1)
+        inner_content = match.group(2)
+
+        hint_match = re.search(r'(<HintPath>)\s*(.*?)\s*(</HintPath>)', inner_content, re.IGNORECASE)
+        if not hint_match:
+            return full_block
+
+        hint_path = hint_match.group(2).strip()
+        hint_path_norm = hint_path.replace("\\", "/")
+        if "packages/" not in hint_path_norm.lower():
+            return full_block
+
+        m_pkg = re.search(r'packages/([^/]+)', hint_path_norm, re.IGNORECASE)
+        if not m_pkg:
+            return full_block
+
+        folder_name = m_pkg.group(1)
+        m_split = re.match(r"^([a-zA-Z0-9._\-]+?)\.([0-9]+(?:\.[0-9]+)*[a-zA-Z0-9.\-]*)$", folder_name)
+        if not m_split:
+            return full_block
+
+        pkg_name = m_split.group(1)
+        pkg_version = m_split.group(2)
+
+        if pkg_name.lower() in update_map:
+            new_ver = update_map[pkg_name.lower()]
+            if pkg_version != new_ver:
+                new_folder_name = f"{pkg_name}.{new_ver}"
+                escaped_folder = re.escape(folder_name)
+                # Use lambda to keep replacement literal
+                new_hint_path = re.sub(
+                    rf'(packages[/\\]){escaped_folder}',
+                    lambda m, nfn=new_folder_name: m.group(1) + nfn,
+                    hint_path,
+                    flags=re.IGNORECASE
+                )
+
+                # Use lambda to keep replacement literal
+                new_inner = re.sub(
+                    r'(<HintPath>)\s*(.*?)\s*(</HintPath>)',
+                    lambda m, nhp=new_hint_path: m.group(1) + nhp + m.group(3),
+                    inner_content,
+                    flags=re.IGNORECASE
+                )
+
+                new_ref_ver = new_ver
+                if len(pkg_version.split(".")) == 3 and pkg_version.endswith(".0"):
+                    new_ref_ver = f"{new_ver}.0"
+                elif "," in attrs_str and "Version=" in attrs_str:
+                    ref_ver_match = re.search(r'Version\s*=\s*([\d.]+)', attrs_str, re.IGNORECASE)
+                    if ref_ver_match:
+                        old_ref_ver = ref_ver_match.group(1)
+                        if len(old_ref_ver.split(".")) == 4 and len(new_ver.split(".")) == 3:
+                            new_ref_ver = f"{new_ver}.0"
+
+                new_attrs = attrs_str
+                if "Version=" in attrs_str:
+                    new_attrs = re.sub(
+                        r'(Version\s*=\s*)[\d.]+',
+                        lambda m, nrv=new_ref_ver: m.group(1) + nrv,
+                        attrs_str,
+                        flags=re.IGNORECASE
+                    )
+
+                changed = True
+                return f'<Reference {new_attrs}>{new_inner}</Reference>'
+
+        return full_block
+
+    new_content_str = re.sub(
+        r'<Reference\s+([^>]+?)>(.*?)</Reference>',
+        replace_reference,
+        content_str,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+
+    if changed:
+        path.write_text(new_content_str, encoding="utf-8")
+
+
+    return changed
+
 
 
 def parse_packages_config(file_path: str) -> List[Dependency]:
