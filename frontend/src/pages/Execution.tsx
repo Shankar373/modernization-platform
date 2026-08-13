@@ -2,16 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { executeMigration } from '../api/client';
 
-
-
 const STEPS = [
-  'Repository ingested',
-  'Technology detected',
-  'Migration plan loaded',
-  'User approved plan',
-  'Executing migration',
-  'Build & test validation',
-  'Report generated',
+  { label: 'Repository ingested',     icon: '\ud83d\udce6' },
+  { label: 'Technology detected',     icon: '\ud83e\uddec' },
+  { label: 'Migration plan loaded',   icon: '\ud83d\uddfa\ufe0f' },
+  { label: 'User approved plan',      icon: '\u2705' },
+  { label: 'Executing migration',     icon: '\u2699\ufe0f' },
+  { label: 'Build & test validation', icon: '\ud83e\uddea' },
+  { label: 'Report generated',        icon: '\ud83d\udcc4' },
 ];
 
 export default function Execution() {
@@ -22,17 +20,12 @@ export default function Execution() {
   const [stepIndex, setStepIndex] = useState(0);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
-
   const hasFired = useRef(false);
 
   useEffect(() => {
-    // ── Guard: React Strict Mode mounts effects twice in dev.
-    //    hasFired ensures the migration call only executes once. ──
     if (hasFired.current) return;
     hasFired.current = true;
-
     const run = async () => {
-      // Animate steps
       for (let i = 0; i < STEPS.length - 2; i++) {
         setStepIndex(i + 1);
         await new Promise(r => setTimeout(r, 600));
@@ -42,62 +35,44 @@ export default function Execution() {
         const data = res.data;
         setResult(data);
         setStepIndex(STEPS.length);
-        // Cache result for Results page fallback
-        sessionStorage.setItem(`result_${data.result_id}`, JSON.stringify(data));
-
-        // ── Write history entry ───────────────────────────────────────────
-        const planMeta = (() => {
-          try { return JSON.parse(sessionStorage.getItem(`plan_${planId}`) || '{}'); }
-          catch { return {}; }
-        })();
-        const language = planMeta?.plan?.targets?.[0]?.language
-          || planMeta?.plan?.steps?.[0]?.adapter
-          || sp.get('lang')
-          || 'unknown';
+        sessionStorage.setItem('result_' + data.result_id, JSON.stringify(data));
+        const planMeta = (() => { try { return JSON.parse(sessionStorage.getItem('plan_' + planId) || '{}'); } catch { return {}; } })();
+        const language = planMeta?.plan?.targets?.[0]?.language || sp.get('lang') || 'unknown';
         const projectName = planMeta?.plan?.project_id?.slice(0, 8) || planId?.slice(0, 8) || 'unknown';
-        sessionStorage.setItem(`run_${data.result_id}`, JSON.stringify({
-          resultId:      data.result_id,
-          planId:        planId,
-          projectName,
-          language,
-          status:        data.status,
-          completedAt:   data.completed_at || new Date().toISOString(),
+        sessionStorage.setItem('run_' + data.result_id, JSON.stringify({
+          resultId: data.result_id, planId, projectName, language,
+          status: data.status, completedAt: data.completed_at || new Date().toISOString(),
           filesModified: data.statistics?.files_modified ?? 0,
           filesScanned:  data.statistics?.files_scanned  ?? 0,
         }));
-        // ─────────────────────────────────────────────────────────────────
-
-        setTimeout(() => navigate(`/results/${data.result_id}`), 1000);
-      } catch (e: any) {
-        setError(e?.response?.data?.detail || 'Migration failed');
-        setStepIndex(-1);
-      }
+        setTimeout(() => navigate('/results/' + data.result_id), 1000);
+      } catch (e: any) { setError(e?.response?.data?.detail || 'Migration failed'); setStepIndex(-1); }
     };
     run();
   }, [planId]);
 
-
   return (
-    <div style={{ maxWidth: 600 }}>
-      <h1 style={{ marginBottom: 8 }}>Migration Execution</h1>
-      <p className="text-muted" style={{ marginBottom: 32 }}>Plan: {planId?.slice(0, 8)}</p>
+    <div className="animate-fade-up" style={{ maxWidth: 600 }}>
+      <h1 style={{ fontSize: 26, marginBottom: 6 }}><span className="text-gradient">Migration Execution</span></h1>
+      <p className="text-muted" style={{ fontSize: 13, marginBottom: 32 }}>Plan: {planId?.slice(0, 8)}</p>
 
       <div className="card">
         <div className="timeline">
           {STEPS.map((step, i) => {
-            const done = i < stepIndex && stepIndex !== -1;
+            const done    = i < stepIndex && stepIndex !== -1;
             const running = i === stepIndex && stepIndex !== STEPS.length && stepIndex !== -1;
-            const failed = stepIndex === -1 && i === stepIndex;
-            const cls = done ? 'done' : running ? 'running' : failed ? 'failed' : 'pending';
+            const cls = done ? 'done' : running ? 'running' : 'pending';
             return (
-              <div className="timeline-item" key={step}>
-                <div className={`timeline-dot ${cls}`}>
-                  {done ? '✓' : running ? '…' : i + 1}
+              <div className="timeline-item" key={step.label} style={{ opacity: done ? 0.7 : 1, transition: 'opacity 0.3s' }}>
+                <div className={'timeline-dot ' + cls}>
+                  {done ? '\u2713' : running ? '\u2026' : i + 1}
                 </div>
                 <div style={{ paddingTop: 2 }}>
-                  <p style={{ fontWeight: done ? 400 : 600, color: done ? 'var(--color-text-muted)' : running ? 'var(--color-accent-2)' : 'var(--color-text-muted)' }}>
-                    {step}
-                  </p>
+                  <span style={{ fontSize: 18, marginRight: 8 }}>{step.icon}</span>
+                  <span style={{ fontWeight: running ? 700 : done ? 400 : 500, color: running ? 'var(--color-accent)' : 'var(--color-text-muted)', transition: 'color 0.3s' }}>
+                    {step.label}
+                  </span>
+                  {running && <span className="spinner" style={{ width: 12, height: 12, marginLeft: 10, display: 'inline-block' }} />}
                 </div>
               </div>
             );
@@ -112,7 +87,7 @@ export default function Execution() {
 
         {result && (
           <div className="status-banner success" style={{ marginTop: 24 }}>
-            <span className="status-icon">✅</span>
+            <span className="status-icon">\u2705</span>
             <div>
               <strong>Migration {result.status}</strong>
               <p className="text-sm" style={{ marginTop: 4 }}>Redirecting to results...</p>

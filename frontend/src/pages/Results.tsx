@@ -131,7 +131,7 @@ export default function Results() {
   ];
 
   return (
-    <div>
+    <div className="animate-fade-up">
       {/* Status banner */}
       <div className={`status-banner ${banner.cls}`} style={{ marginBottom: 28 }}>
         <span className="status-icon">{banner.icon}</span>
@@ -227,7 +227,7 @@ export default function Results() {
       )}
 
       {/* Action buttons */}
-      <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
+      <div className="flex gap-4" style={{ flexWrap: 'wrap', marginTop: 8 }}>
         {changed.length > 0 && (
           <button className="btn btn-primary" onClick={() => navigate(`/results/${resultId}/changes`)}>
             📄 Full Code Diff ({changed.length} files)
@@ -235,11 +235,11 @@ export default function Results() {
         )}
         <button
           id="btn-download-zip"
-          className="btn btn-primary"
-          style={{ background: 'linear-gradient(135deg,#7c3aed,#3b82f6)', border: 'none' }}
+          className="btn btn-systema"
+          style={{ background: 'linear-gradient(135deg,var(--color-systema-purple),var(--color-accent-2))', border: 'none' }}
           onClick={() => resultId && downloadModernizedZip(resultId)}
         >
-          📦 Download Modernized Application (ZIP)
+          📦 Download Modernized ZIP
         </button>
         <button className="btn btn-ghost" onClick={() => navigate('/')}>← Dashboard</button>
         <button className="btn btn-ghost" onClick={() => navigate('/history')}>⟳ History</button>

@@ -58,11 +58,11 @@ export default function CodeChanges() {
   const files = data.changed_files ?? [];
 
   return (
-    <div>
+    <div className="animate-fade-up">
       <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
         <div>
-          <h1>Code Changes</h1>
-          <p className="text-muted" style={{ marginTop: 8 }}>{files.length} files modified</p>
+          <h1 style={{ fontSize: 26, marginBottom: 4 }}><span className="text-gradient">Code Changes</span></h1>
+          <p className="text-muted" style={{ fontSize: 13 }}>{files.length} files modified</p>
         </div>
         <div className="flex gap-2">
           <button

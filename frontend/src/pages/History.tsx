@@ -2,198 +2,158 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 interface HistoryEntry {
-  resultId: string;
-  planId: string;
-  projectName: string;
-  language: string;
-  status: string;
-  completedAt: string;
-  filesModified: number;
-  filesScanned: number;
+  resultId: string; planId: string; projectName: string; language: string;
+  status: string; completedAt: string; filesModified: number; filesScanned: number;
 }
 
-const STATUS_META: Record<string, { cls: string; icon: string; label: string }> = {
-  SUCCESS:              { cls: 'badge-available',   icon: '✅', label: 'Success' },
-  PARTIALLY_SUCCESSFUL: { cls: 'badge-partial',     icon: '⚠️', label: 'Partial' },
-  FAILED:               { cls: 'badge-danger',      icon: '❌', label: 'Failed' },
-  ASSESSMENT_ONLY:      { cls: 'badge-assessment',  icon: 'ℹ️', label: 'Assessment' },
-  NOT_SUPPORTED:        { cls: 'badge-unavailable', icon: '🔲', label: 'Not Supported' },
+const STATUS_META: Record<string, { cls: string; icon: string; label: string; color: string }> = {
+  SUCCESS:              { cls: 'badge-available',   icon: '\u2705', label: 'Success',       color: '#10b981' },
+  PARTIALLY_SUCCESSFUL: { cls: 'badge-partial',     icon: '\u26a0\ufe0f', label: 'Partial',  color: '#f2bd22' },
+  FAILED:               { cls: 'badge-danger',      icon: '\u274c', label: 'Failed',         color: '#ef4444' },
+  ASSESSMENT_ONLY:      { cls: 'badge-assessment',  icon: '\u2139\ufe0f', label: 'Assessment', color: '#8b5cf6' },
+  NOT_SUPPORTED:        { cls: 'badge-unavailable', icon: '\u2b1c', label: 'Not Supported', color: '#475569' },
 };
 
 const LANG_ICONS: Record<string, string> = {
-  python: '🐍', java: '☕', html: '🌐', css: '🎨',
-  javascript: '🟨', typescript: '🔷', go: '🐹', php: '🐘',
+  python: '\ud83d\udc0d', java: '\u2615', html: '\ud83c\udf10', css: '\ud83c\udfa8',
+  javascript: '\ud83d\udfe8', typescript: '\ud83d\udd37', go: '\ud83d\udc39', php: '\ud83d\udc18',
+  csharp: '\ud83d\udd37',
 };
+
+const LANG_COLORS: Record<string, string> = {
+  python: '#3b82f6', java: '#f97316', html: '#10b981', css: '#06b6d4',
+  javascript: '#eab308', typescript: '#3b82f6', csharp: '#a855f7',
+};
+
+function countUp(target: number, setter: (v: number) => void, duration = 700) {
+  if (target === 0) { setter(0); return; }
+  let start = 0;
+  const inc = target / (duration / 16);
+  const t = setInterval(() => {
+    start += inc;
+    if (start >= target) { setter(target); clearInterval(t); }
+    else setter(Math.floor(start));
+  }, 16);
+}
 
 export default function History() {
   const navigate = useNavigate();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [filter, setFilter] = useState('');
+  const [animTotals, setAnimTotals] = useState({ runs: 0, success: 0, partial: 0, files: 0 });
 
   useEffect(() => {
-    // Collect all history entries from sessionStorage
     const found: HistoryEntry[] = [];
     for (let i = 0; i < sessionStorage.length; i++) {
       const key = sessionStorage.key(i);
       if (!key?.startsWith('run_')) continue;
       try {
-        const entry = JSON.parse(sessionStorage.getItem(key) || '{}') as HistoryEntry;
-        if (entry.resultId) found.push(entry);
-      } catch {
-        // ignore malformed entries
-      }
+        const e = JSON.parse(sessionStorage.getItem(key) || '{}') as HistoryEntry;
+        if (e.resultId) found.push(e);
+      } catch { /* ignore */ }
     }
-    // Sort newest first
     found.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
     setEntries(found);
+    const t = { runs: found.length, success: found.filter(e => e.status === 'SUCCESS').length, partial: found.filter(e => e.status === 'PARTIALLY_SUCCESSFUL').length, files: found.reduce((s, e) => s + (e.filesModified ?? 0), 0) };
+    countUp(t.runs,    v => setAnimTotals(p => ({ ...p, runs: v })));
+    countUp(t.success, v => setAnimTotals(p => ({ ...p, success: v })));
+    countUp(t.partial, v => setAnimTotals(p => ({ ...p, partial: v })));
+    countUp(t.files,   v => setAnimTotals(p => ({ ...p, files: v })));
   }, []);
 
   const clearHistory = () => {
     const keys: string[] = [];
     for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (key?.startsWith('run_')) keys.push(key);
+      const k = sessionStorage.key(i);
+      if (k?.startsWith('run_')) keys.push(k);
     }
     keys.forEach(k => sessionStorage.removeItem(k));
-    setEntries([]);
+    setEntries([]); setAnimTotals({ runs: 0, success: 0, partial: 0, files: 0 });
   };
 
-  const filtered = filter
-    ? entries.filter(e =>
-        e.projectName.toLowerCase().includes(filter.toLowerCase()) ||
-        e.language.toLowerCase().includes(filter.toLowerCase()) ||
-        e.status.toLowerCase().includes(filter.toLowerCase())
-      )
-    : entries;
+  const filtered = filter ? entries.filter(e =>
+    e.projectName?.toLowerCase().includes(filter.toLowerCase()) ||
+    e.language?.toLowerCase().includes(filter.toLowerCase()) ||
+    e.status?.toLowerCase().includes(filter.toLowerCase())
+  ) : entries;
+
+  const statCards = [
+    { label: 'Total Runs',     value: animTotals.runs,    color: 'var(--color-accent-2)',      icon: '\ud83d\ude80' },
+    { label: 'Successful',     value: animTotals.success,  color: 'var(--color-success)',        icon: '\u2705' },
+    { label: 'Partial',        value: animTotals.partial,  color: 'var(--color-warning)',        icon: '\u26a1' },
+    { label: 'Files Modified', value: animTotals.files,    color: 'var(--color-systema-purple)', icon: '\ud83d\udcc4' },
+  ];
 
   return (
-    <div>
+    <div className="animate-fade-up">
       <div className="flex items-center justify-between" style={{ marginBottom: 32 }}>
         <div>
-          <h1>Migration History</h1>
-          <p className="text-muted" style={{ marginTop: 8 }}>
-            {entries.length} migration{entries.length !== 1 ? 's' : ''} recorded this session
-          </p>
+          <h1 style={{ fontSize: 26, marginBottom: 6 }}><span className="text-gradient">Migration History</span></h1>
+          <p className="text-muted" style={{ fontSize: 14 }}>{entries.length} migration{entries.length !== 1 ? 's' : ''} recorded this session</p>
         </div>
         <div className="flex gap-2">
-          {entries.length > 0 && (
-            <button className="btn btn-ghost" onClick={clearHistory} style={{ fontSize: 12 }}>
-              🗑 Clear History
-            </button>
-          )}
-          <button className="btn btn-primary" onClick={() => navigate('/new')}>
-            ＋ New Migration
-          </button>
+          {entries.length > 0 && <button className="btn btn-ghost" onClick={clearHistory} style={{ fontSize: 12 }}>\ud83d\uddd1 Clear</button>}
+          <button className="btn btn-systema" onClick={() => navigate('/new')}> New Migration</button>
         </div>
       </div>
 
       {entries.length > 0 && (
-        <div className="form-group" style={{ maxWidth: 360, marginBottom: 24 }}>
-          <input
-            className="input"
-            placeholder="🔍  Filter by project, language or status…"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-          />
+        <div className="stat-grid" style={{ marginBottom: 28 }}>
+          {statCards.map(s => (
+            <div className="stat-card" key={s.label}>
+              <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
+              <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+              <div className="stat-label">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {entries.length > 0 && (
+        <div className="form-group" style={{ maxWidth: 380, marginBottom: 20 }}>
+          <input className="input" placeholder="Filter by project, language or status" value={filter} onChange={e => setFilter(e.target.value)} />
         </div>
       )}
 
       {filtered.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 64 }}>
-          <p style={{ fontSize: 48, marginBottom: 20 }}>📋</p>
-          <p className="text-muted" style={{ marginBottom: 20 }}>
-            {filter ? 'No migrations match your filter.' : 'No migrations yet this session.'}
-          </p>
-          {!filter && (
-            <button className="btn btn-primary" onClick={() => navigate('/new')}>
-              Start your first migration →
-            </button>
-          )}
+        <div className="card" style={{ textAlign: 'center', padding: '56px 32px' }}>
+          <div className="empty-icon">\ud83d\udccb</div>
+          <h3 style={{ marginBottom: 10 }}>{filter ? 'No migrations match your filter.' : 'No migrations yet this session.'}</h3>
+          <p className="text-muted" style={{ marginBottom: 20 }}>Upload a ZIP or connect a repository to get started.</p>
+          {!filter && <button className="btn btn-primary" onClick={() => navigate('/new')}>Start your first migration</button>}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {filtered.map((entry) => {
             const meta = STATUS_META[entry.status] || STATUS_META.ASSESSMENT_ONLY;
-            const icon = LANG_ICONS[entry.language?.toLowerCase()] || '📦';
-            const date = entry.completedAt
-              ? new Date(entry.completedAt).toLocaleString()
-              : '—';
-
+            const langKey = entry.language?.toLowerCase();
+            const icon = LANG_ICONS[langKey] || '\ud83d\udce6';
+            const langColor = LANG_COLORS[langKey] || 'var(--color-systema-purple)';
+            const date = entry.completedAt ? new Date(entry.completedAt).toLocaleString() : '-';
             return (
-              <div
-                key={entry.resultId}
-                className="card"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '48px 1fr auto auto',
-                  alignItems: 'center',
-                  gap: 20,
-                  padding: '18px 24px',
-                  cursor: 'pointer',
-                  transition: 'border-color 0.18s',
-                }}
-                onClick={() => navigate(`/results/${entry.resultId}`)}
+              <div key={entry.resultId} className="card"
+                style={{ display: 'grid', gridTemplateColumns: '56px 1fr auto auto', alignItems: 'center', gap: 20, padding: '18px 24px', cursor: 'pointer', transition: 'transform 0.18s, box-shadow 0.18s', borderLeft: '3px solid ' + meta.color }}
+                onClick={() => navigate('/results/' + entry.resultId)}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateX(4px)'; (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-lg)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = 'translateX(0)'; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
               >
-                {/* Language icon */}
-                <div style={{
-                  width: 48, height: 48, borderRadius: 12,
-                  background: 'var(--color-surface-2)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 24,
-                }}>
-                  {icon}
-                </div>
-
-                {/* Info */}
+                <div style={{ width: 48, height: 48, borderRadius: 12, background: langColor + '18', border: '1px solid ' + langColor + '33', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>{icon}</div>
                 <div>
                   <div className="flex items-center gap-3" style={{ marginBottom: 6 }}>
-                    <span style={{ fontWeight: 600, fontSize: 15 }}>
-                      {entry.projectName || 'Unnamed project'}
-                    </span>
-                    <span className={`badge ${meta.cls}`} style={{ fontSize: 11 }}>
-                      {meta.icon} {meta.label}
-                    </span>
-                    <span className="badge badge-assessment" style={{ fontSize: 10, textTransform: 'uppercase' }}>
-                      {entry.language}
-                    </span>
+                    <span style={{ fontWeight: 700, fontSize: 15 }}>{entry.projectName || 'Unnamed project'}</span>
+                    <span className={'badge ' + meta.cls} style={{ fontSize: 11 }}>{meta.icon} {meta.label}</span>
+                    <span className="badge badge-assessment" style={{ fontSize: 10, textTransform: 'uppercase' }}>{entry.language}</span>
                   </div>
-                  <p className="text-sm text-muted">
-                    {entry.filesModified ?? 0} file{entry.filesModified !== 1 ? 's' : ''} modified
-                    &nbsp;·&nbsp;{entry.filesScanned ?? 0} scanned
-                    &nbsp;·&nbsp;{date}
-                  </p>
+                  <p className="text-sm text-muted">{entry.filesModified ?? 0} files modified &middot; {entry.filesScanned ?? 0} scanned &middot; {date}</p>
                 </div>
-
-                {/* Stats pill */}
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-accent)' }}>
-                    {entry.filesModified ?? 0}
-                  </div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-accent)' }}>{entry.filesModified ?? 0}</div>
                   <div className="text-sm text-muted">changed</div>
                 </div>
-
-                {/* Arrow */}
-                <span style={{ color: 'var(--color-text-muted)', fontSize: 20 }}>›</span>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: 20 }}>&#8250;</span>
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Summary stats */}
-      {entries.length > 0 && (
-        <div className="stat-grid" style={{ marginTop: 32 }}>
-          {[
-            { label: 'Total Runs',     value: entries.length },
-            { label: 'Successful',     value: entries.filter(e => e.status === 'SUCCESS').length },
-            { label: 'Partial',        value: entries.filter(e => e.status === 'PARTIALLY_SUCCESSFUL').length },
-            { label: 'Files Modified', value: entries.reduce((s, e) => s + (e.filesModified ?? 0), 0) },
-          ].map(s => (
-            <div className="stat-card" key={s.label}>
-              <div className="stat-value">{s.value}</div>
-              <div className="stat-label">{s.label}</div>
-            </div>
-          ))}
         </div>
       )}
     </div>
