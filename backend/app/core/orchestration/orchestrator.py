@@ -7,10 +7,12 @@ It does NOT contain language-specific if/elif routing.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
 
 
 from app.adapters.base import MigrationAdapter, adapter_registry, CSharpRoslynAdapter
@@ -42,6 +44,144 @@ from app.discovery.scanner import UniversalScanner
 
 if not hasattr(CapabilityStatus, "PARTIALLY_AVAILABLE"):
     setattr(CapabilityStatus, "PARTIALLY_AVAILABLE", CapabilityStatus.PARTIAL)
+
+# ── UniversalScanner C# Discovery Enhancements ──────────────────────────────
+from app.discovery.scanner import _FRAMEWORK_SIGNATURES, _BUILD_SIGNATURES, _LANGUAGE_SIGNATURES
+from app.core.domain.models import DetectedDependency
+
+if "C#" in _LANGUAGE_SIGNATURES:
+    _LANGUAGE_SIGNATURES["C#"]["marker_files"] = ["*.csproj", "*.sln"]
+
+
+_CSHARP_FRAMEWORKS = [
+    {"name": "ASP.NET MVC", "language": "C#", "markers": ["System.Web.Mvc", "Autofac.Mvc", "@Controller", "Global.asax", "routes.MapRoute"], "files": ["packages.config", "Web.config", "Global.asax", "*.csproj"]},
+    {"name": "ASP.NET WebForms", "language": "C#", "markers": ["System.Web.UI", "Autofac.Web", ".aspx", "System.Web.Optimization"], "files": ["packages.config", "Web.config", "*.csproj"]},
+    {"name": "ASP.NET Web API", "language": "C#", "markers": ["System.Web.Http", "ApiController", "Microsoft.AspNet.WebApi"], "files": ["packages.config", "Web.config", "*.csproj"]},
+    {"name": "WCF", "language": "C#", "markers": ["System.ServiceModel", "ServiceContract", "OperationContract"], "files": ["packages.config", "Web.config", "*.csproj"]},
+    {"name": "WinForms", "language": "C#", "markers": ["System.Windows.Forms", "Form"], "files": ["*.csproj", "*.cs"]},
+    {"name": "WPF", "language": "C#", "markers": ["PresentationFramework", "System.Windows.Controls"], "files": ["*.csproj", "*.xaml"]},
+    {"name": "Entity Framework", "language": "C#", "markers": ["EntityFramework", "DbContext"], "files": ["packages.config", "*.csproj", "Web.config", "App.config"]},
+    {"name": "ASP.NET Core", "language": "C#", "markers": ["Microsoft.AspNetCore", "WebApplication.CreateBuilder"], "files": ["*.csproj", "Program.cs", "Startup.cs"]},
+]
+
+for fw in _CSHARP_FRAMEWORKS:
+    if not any(f["name"] == fw["name"] for f in _FRAMEWORK_SIGNATURES):
+        _FRAMEWORK_SIGNATURES.append(fw)
+
+_CSHARP_BUILDS = [
+    {"name": "MSBuild", "language": "C#", "files": ["*.sln", "*.csproj"]},
+    {"name": "dotnet CLI", "language": "C#", "files": ["global.json"]},
+]
+for b in _CSHARP_BUILDS:
+    if not any(b_sig["name"] == b["name"] for b_sig in _BUILD_SIGNATURES):
+        _BUILD_SIGNATURES.append(b)
+
+_orig_detect_version = UniversalScanner._detect_version
+
+def _enhanced_detect_version(self, language: str, ws: Path):
+    if language == "C#":
+        versions = set()
+        for csproj in ws.rglob("*.csproj"):
+            if self._is_ignored(csproj): continue
+            try:
+                content = csproj.read_text(encoding="utf-8", errors="replace")
+                m_tfv = re.findall(r"<TargetFrameworkVersion>\s*v?([\d\.]+)\s*</TargetFrameworkVersion>", content, re.IGNORECASE)
+                for v in m_tfv:
+                    versions.add(f".NET Framework {v}")
+                m_tf = re.findall(r"<TargetFramework>\s*([a-zA-Z0-9\.\-]+)\s*</TargetFramework>", content, re.IGNORECASE)
+                for tf in m_tf:
+                    tf_l = tf.lower()
+                    if tf_l.startswith("netcoreapp"):
+                        versions.add(f".NET Core {tf[10:]}")
+                    elif tf_l.startswith("net") and len(tf_l) >= 4 and tf_l[3].isdigit():
+                        num = tf[3:]
+                        if "." in num or float(num if num.replace(".", "", 1).isdigit() else 0) >= 5:
+                            versions.add(f".NET {num}")
+                        else:
+                            fmt = ".".join(list(num))
+                            versions.add(f".NET Framework {fmt}")
+                    else:
+                        versions.add(tf)
+            except Exception:
+                pass
+        if versions:
+            return ", ".join(sorted(list(versions)))
+    return _orig_detect_version(self, language, ws)
+
+UniversalScanner._detect_version = _enhanced_detect_version
+
+_orig_detect_languages = UniversalScanner._detect_languages
+
+def _enhanced_detect_languages(self, ws: Path, files: list[Path], ext_counts: dict):
+    detected = _orig_detect_languages(self, ws, files, ext_counts)
+    has_cs = any(f.suffix.lower() == ".cs" for f in files)
+    has_proj = any(f.suffix.lower() in (".csproj", ".sln") for f in ws.rglob("*") if not self._is_ignored(f))
+    cs_lang = next((l for l in detected if l.name == "C#"), None)
+    if cs_lang:
+        if not cs_lang.version:
+            cs_lang.version = self._detect_version("C#", ws)
+    elif has_cs or has_proj:
+        from app.core.domain.models import DetectedLanguage, DetectionEvidence
+        ver = self._detect_version("C#", ws)
+        detected.append(DetectedLanguage(
+            name="C#",
+            version=ver,
+            confidence=0.9,
+            evidence=[DetectionEvidence(description="Found C# source/project files", weight=0.9)],
+        ))
+    return detected
+
+UniversalScanner._detect_languages = _enhanced_detect_languages
+
+
+_orig_detect_dependencies = UniversalScanner._detect_dependencies
+def _enhanced_detect_dependencies(self, ws: Path):
+    deps = _orig_detect_dependencies(self, ws)
+    # packages.config
+    for pkg_file in ws.rglob("packages.config"):
+        if self._is_ignored(pkg_file): continue
+        try:
+            content = pkg_file.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r'<package\s+id="([^"]+)"\s+version="([^"]+)"', content):
+                deps.append(DetectedDependency(name=m.group(1), version=m.group(2), language="C#"))
+        except Exception:
+            pass
+
+    # PackageReference
+    for csproj in ws.rglob("*.csproj"):
+        if self._is_ignored(csproj): continue
+        try:
+            content = csproj.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r'<PackageReference\s+Include="([^"]+)"(?:\s+Version="([^"]+)")?', content):
+                deps.append(DetectedDependency(name=m.group(1), version=m.group(2) if m.group(2) else None, language="C#"))
+        except Exception:
+            pass
+    return deps[:100]
+
+UniversalScanner._detect_dependencies = _enhanced_detect_dependencies
+
+_orig_detect_testing = UniversalScanner._detect_testing_frameworks
+def _enhanced_detect_testing(self, ws: Path, files: list[Path]):
+    found = _orig_detect_testing(self, ws, files)
+    csharp_test_checks = {
+        "MSTest": ["Microsoft.VisualStudio.TestTools.UnitTesting", "MSTest", "[TestClass]", "[TestMethod]"],
+        "NUnit": ["nunit.framework", "NUnit", "[TestFixture]", "[Test]"],
+        "xUnit": ["xunit", "[Fact]", "[Theory]"],
+    }
+    all_text = ""
+    for f in files[:200]:
+        if f.suffix.lower() in (".cs", ".csproj", ".config"):
+            try:
+                all_text += f.read_text(encoding="utf-8", errors="replace")[:1000]
+            except Exception:
+                pass
+    for name, markers in csharp_test_checks.items():
+        if name not in found and any(m.lower() in all_text.lower() for m in markers):
+            found.append(name)
+    return found
+
+UniversalScanner._detect_testing_frameworks = _enhanced_detect_testing
+
 
 
 

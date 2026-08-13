@@ -4,7 +4,9 @@ import os
 import shutil
 import tempfile
 import git
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
+
 
 from app.core.git_safety import (
     verify_workspace_is_git,
@@ -493,6 +495,66 @@ def test_csharp_roslyn_adapter_and_ast_transform():
     csproj_code = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>netcoreapp3.1</TargetFramework>\n  </PropertyGroup>\n</Project>"
     res_csproj = transformer.transform_csproj(csproj_code, target_framework="net8.0")
     assert "<TargetFramework>net8.0</TargetFramework>" in res_csproj
+
+
+def test_csharp_application_discovery(tmp_path: Path):
+    """Verify UniversalScanner C# discovery for .csproj, ASP.NET MVC/WebForms, MSBuild, packages.config, and test frameworks."""
+    from app.core.orchestration.orchestrator import UniversalScanner
+
+    # Create dummy C# legacy project structure
+    (tmp_path / "App.sln").write_text("Microsoft Visual Studio Solution File, Format Version 12.00", encoding="utf-8")
+    
+    csproj = tmp_path / "LegacyApp.csproj"
+    csproj.write_text("""<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Web.Mvc" />
+    <Reference Include="System.Web.UI" />
+    <Reference Include="EntityFramework" />
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+    (tmp_path / "packages.config").write_text("""<?xml version="1.0" encoding="utf-8"?>
+<packages>
+  <package id="EntityFramework" version="6.2.0" targetFramework="net472" />
+  <package id="Autofac.Mvc5" version="4.0.2" targetFramework="net472" />
+</packages>""", encoding="utf-8")
+
+    (tmp_path / "Global.asax").write_text("<%@ Application Language=\"C#\" %>", encoding="utf-8")
+    (tmp_path / "Web.config").write_text("<configuration><system.web><httpModules></httpModules></system.web></configuration>", encoding="utf-8")
+
+    test_cs = tmp_path / "UnitTest1.cs"
+    test_cs.write_text("using Microsoft.VisualStudio.TestTools.UnitTesting;\n[TestClass]\npublic class UnitTest1 {\n[TestMethod]\npublic void Test() {}\n}", encoding="utf-8")
+
+    scanner = UniversalScanner()
+    profile = scanner.scan(str(tmp_path))
+    cs_lang = next((l for l in profile.languages if l.name == "C#"), None)
+    assert cs_lang is not None
+    assert cs_lang.version is not None
+    assert ".NET Framework 4.7.2" in cs_lang.version
+
+
+
+    # 2. Check Frameworks
+    fw_names = [f.name for f in profile.frameworks]
+    assert "ASP.NET MVC" in fw_names
+    assert "ASP.NET WebForms" in fw_names
+    assert "Entity Framework" in fw_names
+
+    # 3. Check Build System
+    build_names = [b.name for b in profile.build_systems]
+    assert "MSBuild" in build_names
+
+    # 4. Check NuGet Dependencies
+    dep_names = [d.name for d in profile.dependencies]
+    assert "EntityFramework" in dep_names
+    assert "Autofac.Mvc5" in dep_names
+
+    # 5. Check Test Framework
+    assert "MSTest" in profile.testing_frameworks
+
 
 
 
