@@ -316,28 +316,153 @@ UniversalScanner._detect_languages = _enhanced_detect_languages
 
 
 _orig_detect_dependencies = UniversalScanner._detect_dependencies
-def _enhanced_detect_dependencies(self, ws: Path):
-    deps = _orig_detect_dependencies(self, ws)
-    # packages.config
+
+def _enhanced_detect_dependencies(self, ws: Path):  # noqa: C901
+    # Start with original base scanner dependencies (Java pom.xml & Python requirements.txt)
+    base_deps = _orig_detect_dependencies(self, ws)
+    
+    seen = set()
+    deps = []
+    
+    def add_dep(name: str, version: Optional[str], lang: str):
+        if not name:
+            return
+        name = name.strip()
+        version = version.strip() if version else None
+        key = (name.lower(), lang.lower())
+        if key not in seen:
+            seen.add(key)
+            deps.append(DetectedDependency(name=name, version=version, language=lang))
+
+    # Add base dependencies first (and normalize their names/versions)
+    for d in base_deps:
+        add_dep(d.name, d.version, d.language)
+
+    # 1. C# packages.config
     for pkg_file in ws.rglob("packages.config"):
         if self._is_ignored(pkg_file): continue
         try:
             content = pkg_file.read_text(encoding="utf-8", errors="replace")
-            for m in re.finditer(r'<package\s+id="([^"]+)"\s+version="([^"]+)"', content):
-                deps.append(DetectedDependency(name=m.group(1), version=m.group(2), language="C#"))
+            for m in re.finditer(r'<package\s+([^>]+?)/?>', content, re.IGNORECASE):
+                attrs = dict(re.findall(r'(\w+)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(1)))
+                name = attrs.get("id")
+                version = attrs.get("version")
+                if name:
+                    add_dep(name, version, "C#")
         except Exception:
             pass
 
-    # PackageReference
+    # 2. C# PackageReference (.csproj)
     for csproj in ws.rglob("*.csproj"):
         if self._is_ignored(csproj): continue
         try:
             content = csproj.read_text(encoding="utf-8", errors="replace")
-            for m in re.finditer(r'<PackageReference\s+Include="([^"]+)"(?:\s+Version="([^"]+)")?', content):
-                deps.append(DetectedDependency(name=m.group(1), version=m.group(2) if m.group(2) else None, language="C#"))
+            # Parse PackageReference block tags and self-closing tags
+            matches = re.finditer(r'<PackageReference\s+([^>]+?)(?:/>|>(.*?)</PackageReference>)', content, re.DOTALL | re.IGNORECASE)
+            for m in matches:
+                attrs_str = m.group(1)
+                inner_content = m.group(2) if m.group(2) else ""
+                attrs = dict(re.findall(r'(\w+)\s*=\s*[\'"]([^\'"]+)[\'"]', attrs_str))
+                name = attrs.get("Include") or attrs.get("Update")
+                if not name:
+                    continue
+                version = attrs.get("Version")
+                if not version and inner_content:
+                    v_match = re.search(r'<Version>\s*(.*?)\s*</Version>', inner_content, re.IGNORECASE)
+                    if v_match:
+                        version = v_match.group(1).strip()
+                add_dep(name, version, "C#")
         except Exception:
             pass
-    return deps[:100]
+
+    # 3. JavaScript / TypeScript package.json
+    for pkg_file in ws.rglob("package.json"):
+        if self._is_ignored(pkg_file): continue
+        try:
+            import json as _json
+            data = _json.loads(pkg_file.read_text(encoding="utf-8", errors="replace"))
+            for dep_type in ["dependencies", "devDependencies"]:
+                for name, ver in data.get(dep_type, {}).items():
+                    clean_ver = re.sub(r'^[~^>=<*\s]+', '', str(ver)).strip()
+                    add_dep(name, clean_ver or None, "JavaScript")
+        except Exception:
+            pass
+
+    # 4. Ruby Gemfile & Gemfile.lock
+    for gfl in ws.rglob("Gemfile.lock"):
+        if self._is_ignored(gfl): continue
+        try:
+            content = gfl.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r'^\s{4}([a-zA-Z0-9_\-]+)\s+\(([\d\.]+)\)', content, re.MULTILINE):
+                add_dep(m.group(1), m.group(2), "Ruby")
+        except Exception:
+            pass
+    for gf in ws.rglob("Gemfile"):
+        if self._is_ignored(gf): continue
+        try:
+            content = gf.read_text(encoding="utf-8", errors="replace")
+            for line in content.splitlines():
+                line = line.strip()
+                if line.startswith("gem "):
+                    m = re.match(r"gem\s+['\"]([^'\"]+)['\"](?:\s*,\s*['\"]([^'\"]+)['\"])?", line)
+                    if m:
+                        name = m.group(1)
+                        version = m.group(2)
+                        if version:
+                            version = re.sub(r'^[~^>=<*\s]+', '', version).strip()
+                        add_dep(name, version or None, "Ruby")
+        except Exception:
+            pass
+
+    # 5. Python pyproject.toml
+    for ppt in ws.rglob("pyproject.toml"):
+        if self._is_ignored(ppt): continue
+        try:
+            content = ppt.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r'["\']?([a-zA-Z0-9_\-]+)["\']?\s*=\s*["\']([^"\']+)["\']', content):
+                name, ver = m.group(1), m.group(2)
+                if name not in ("python", "target-version", "requires-python"):
+                    clean_ver = re.sub(r'^[~^>=<*\s]+', '', ver).strip()
+                    add_dep(name, clean_ver or None, "Python")
+        except Exception:
+            pass
+
+    # 6. Go go.mod
+    for gm in ws.rglob("go.mod"):
+        if self._is_ignored(gm): continue
+        try:
+            content = gm.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r'^\s*([a-zA-Z0-9\.\-_/]+)\s+(v[\d\.]+)', content, re.MULTILINE):
+                add_dep(m.group(1), m.group(2).lstrip("v"), "Go")
+        except Exception:
+            pass
+
+    # 7. PHP composer.json
+    for comp in ws.rglob("composer.json"):
+        if self._is_ignored(comp): continue
+        try:
+            import json as _json
+            data = _json.loads(comp.read_text(encoding="utf-8", errors="replace"))
+            for dep_type in ["require", "require-dev"]:
+                for name, ver in data.get(dep_type, {}).items():
+                    if name.lower() != "php":
+                        clean_ver = re.sub(r'^[~^>=<*\s]+', '', str(ver)).strip()
+                        add_dep(name, clean_ver or None, "PHP")
+        except Exception:
+            pass
+
+    # 8. Gradle build files (Java / Kotlin)
+    for grad in list(ws.rglob("build.gradle")) + list(ws.rglob("build.gradle.kts")):
+        if self._is_ignored(grad): continue
+        try:
+            content = grad.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r'(?:implementation|api|compile|testImplementation)\s*\(?["\']([^"\':]+):([^"\':]+):([^"\':]+)["\']\)?', content):
+                add_dep(f"{m.group(1)}:{m.group(2)}", m.group(3), "Java")
+        except Exception:
+            pass
+
+    return deps[:150]
+
 
 UniversalScanner._detect_dependencies = _enhanced_detect_dependencies
 
