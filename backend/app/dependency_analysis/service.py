@@ -377,7 +377,7 @@ def update_csproj(
                 if old_ver != new_ver:
                     new_line = re.sub(
                         r'(<Version>)\s*.*?\s*(</Version>)',
-                        f'\\1{new_ver}\\2',
+                        lambda m, nv=new_ver: m.group(1) + nv + m.group(2),
                         line,
                         flags=re.IGNORECASE
                     )
