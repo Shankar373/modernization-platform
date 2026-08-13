@@ -1,6 +1,7 @@
 """Git repository safety verification and checkpoint recovery manager."""
 import os
 import git
+import traceback
 from datetime import datetime
 from app.db.crud import CRUDRepository
 from app.db.models import DBMigrationCheckpoint
@@ -19,7 +20,6 @@ def get_repo_info(workspace_path: str) -> dict:
     """Retrieve current branch, HEAD SHA, and dirty status of the workspace."""
     try:
         repo = git.Repo(workspace_path)
-        # Determine current branch safely
         try:
             branch = repo.active_branch.name
         except TypeError:
@@ -46,8 +46,8 @@ def get_repo_info(workspace_path: str) -> dict:
 
 async def create_git_checkpoint(workspace_path: str, run_id: str, project_id: str, db) -> DBMigrationCheckpoint:
     """
-    Ensures workspace is a Git repository, verifies cleanliness, commits/references
-    a baseline checkpoint immediately before transformation, and persists to DB.
+    Ensures workspace is a Git repository, verifies cleanliness, and creates a pre-transformation checkpoint.
+    Fails and blocks if the repository contains pre-existing user modifications.
     """
     repo_path = os.path.abspath(workspace_path)
     
@@ -55,10 +55,8 @@ async def create_git_checkpoint(workspace_path: str, run_id: str, project_id: st
     if not verify_workspace_is_git(repo_path):
         try:
             repo = git.Repo.init(repo_path)
-            # Configure dummy local user details for this commit
             repo.config_writer().set_value("user", "name", "SystemaOps Autopilot").release()
             repo.config_writer().set_value("user", "email", "autopilot@systemaops.com").release()
-            # Commit baseline
             repo.git.add(A=True)
             repo.git.commit(m="SystemaOps Baseline Checkpoint")
         except Exception as e:
@@ -67,18 +65,10 @@ async def create_git_checkpoint(workspace_path: str, run_id: str, project_id: st
     repo = git.Repo(repo_path)
     info = get_repo_info(repo_path)
 
-    # 2. Check for dirty working trees (prevent modernization if user has uncommitted changes)
-    # Note: if it's our own baseline commit, it won't be dirty.
+    # 2. Safety Gate: Block execution if pre-existing user changes are found.
+    # We do NOT automatically commit user modifications.
     if info["is_dirty"]:
-        # Stage and commit any untracked or unstaged modifications as a pre-modernization auto-commit
-        # to ensure they are not lost!
-        try:
-            repo.git.add(A=True)
-            repo.git.commit(m="Pre-modernization user checkpoint")
-            # Refresh info
-            info = get_repo_info(repo_path)
-        except Exception as e:
-            raise RuntimeError(f"Workspace contains uncommitted changes and auto-commit failed: {e}")
+        raise RuntimeError("Workspace is dirty with pre-existing uncommitted user changes. Modernization blocked to protect user changes.")
 
     # 3. Save checkpoint to database
     db_cp = await CRUDRepository.create_migration_checkpoint(
@@ -97,8 +87,8 @@ async def create_git_checkpoint(workspace_path: str, run_id: str, project_id: st
 
 async def rollback_git_checkpoint(run_id: str, db) -> dict:
     """
-    Identifies the most recent pre-transformation checkpoint for a run,
-    checks repository safety guidelines, and rolls back the workspace modifications.
+    Safely rolls back the workspace changes back to the pre-transformation checkpoint.
+    Blocks the rollback if unexpected user changes are detected after the checkpoint was created.
     """
     checkpoints = await CRUDRepository.get_migration_checkpoints(db, run_id)
     if not checkpoints:
@@ -107,6 +97,7 @@ async def rollback_git_checkpoint(run_id: str, db) -> dict:
     checkpoint = checkpoints[0]
     repo_path = checkpoint.repository_path
 
+    # Verify repository path identity matches
     if not verify_workspace_is_git(repo_path):
         await CRUDRepository.update_checkpoint_rollback_status(
             db, checkpoint.checkpoint_id, "FAILED", "Workspace is no longer a valid Git repository."
@@ -115,21 +106,66 @@ async def rollback_git_checkpoint(run_id: str, db) -> dict:
 
     try:
         repo = git.Repo(repo_path)
-        # Update status
-        await CRUDRepository.update_checkpoint_rollback_status(
-            db, checkpoint.checkpoint_id, "IN_PROGRESS"
-        )
 
-        # Safety Check: check if the commit SHA exists in the history
+        # 1. Safety Check: Verify commit SHA exists in git history
         try:
             repo.commit(checkpoint.commit_sha)
         except Exception:
             await CRUDRepository.update_checkpoint_rollback_status(
-                db, checkpoint.checkpoint_id, "FAILED", f"Checkpoint commit SHA {checkpoint.commit_sha} not found in Git repository."
+                db, checkpoint.checkpoint_id, "FAILED", f"Checkpoint commit SHA {checkpoint.commit_sha} not found in history."
             )
             return {"status": "FAILED", "message": f"Checkpoint commit SHA {checkpoint.commit_sha} not found in history."}
 
-        # Perform clean rollback to target commit SHA
+        # 2. Safety Check: Verify branch match if active branch was recorded
+        try:
+            current_branch = repo.active_branch.name
+        except TypeError:
+            current_branch = "DETACHED_HEAD"
+        if checkpoint.branch and checkpoint.branch != current_branch:
+            await CRUDRepository.update_checkpoint_rollback_status(
+                db, checkpoint.checkpoint_id, "BLOCKED", f"Branch mismatch: expected {checkpoint.branch}, found {current_branch}"
+            )
+            return {"status": "BLOCKED", "message": f"Branch mismatch: expected {checkpoint.branch}, found {current_branch}."}
+
+        # 3. Safety Check: Block rollback if unexpected user modifications occurred after checkpoint creation
+        # We determine the files currently modified in the workspace
+        modified_files = set()
+        for diff in repo.index.diff(None):
+            modified_files.add(diff.a_path)
+        for diff in repo.index.diff("HEAD"):
+            modified_files.add(diff.a_path)
+        for untracked in repo.untracked_files:
+            modified_files.add(untracked)
+
+        # Fetch allowed changed files for this migration run
+        db_run = await CRUDRepository.get_migration_run(db, run_id)
+        allowed_files = set()
+        if db_run and db_run.changed_files:
+            for f in db_run.changed_files:
+                # Store paths relative to repo root
+                allowed_files.add(f.get("file_path"))
+
+        # If any modified file is NOT in the allowed list, block rollback to protect user modifications
+        unexpected_files = modified_files - allowed_files
+        if unexpected_files:
+            # Skip blocking if all changes are inside allowed files or if we want strict blocking
+            # Let's filter out hidden cache files or git config files if any
+            unexpected_user_files = {f for f in unexpected_files if not f.startswith(".")}
+            if unexpected_user_files:
+                await CRUDRepository.update_checkpoint_rollback_status(
+                    db, checkpoint.checkpoint_id, "BLOCKED", f"Unexpected user changes detected: {unexpected_user_files}"
+                )
+                return {
+                    "status": "BLOCKED",
+                    "message": f"Rollback blocked: Unexpected user changes detected in files: {unexpected_user_files}"
+                }
+
+        # Update status to IN_PROGRESS
+        await CRUDRepository.update_checkpoint_rollback_status(
+            db, checkpoint.checkpoint_id, "IN_PROGRESS"
+        )
+
+        # 4. Perform rollback safely
         repo.git.reset("--hard", checkpoint.commit_sha)
         repo.git.clean("-fd")
 
@@ -140,8 +176,8 @@ async def rollback_git_checkpoint(run_id: str, db) -> dict:
         return {"status": "SUCCESS", "message": f"Rollback to checkpoint {checkpoint.commit_sha} succeeded."}
 
     except Exception as e:
-        trace = traceback.format_exc() if "traceback" in globals() else str(e)
+        trace = traceback.format_exc()
         await CRUDRepository.update_checkpoint_rollback_status(
             db, checkpoint.checkpoint_id, "FAILED", f"Git reset error: {e}"
         )
-        return {"status": "FAILED", "message": f"Git reset failed: {e}"}
+        return {"status": "FAILED", "message": f"Git reset failed: {e}\n{trace}"}
