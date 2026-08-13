@@ -429,4 +429,32 @@ async def test_report_endpoint_generation():
         assert quality_stage["message"] == "Not Implemented"
 
 
+# ── Extensible Adapter Architecture & Roadmap Tests ─────────────────────────
+
+def test_adapter_registry_roadmap_ordering():
+    from app.adapters.base import adapter_registry
+    roadmap = adapter_registry.get_roadmap_status()
+    assert len(roadmap) > 0
+    
+    # Priority 1 must be Java OpenRewrite
+    java_entry = next(r for r in roadmap if r["language"] == "java")
+    assert java_entry["engine"] == "OpenRewrite"
+    assert java_entry["roadmap_priority"] == 1
+    assert java_entry["maturity"] == "PRODUCTION"
+
+    # Priority 2 must be Python LibCST + Ruff
+    py_entry = next(r for r in roadmap if r["language"] == "python")
+    assert py_entry["engine"] == "LibCST + Ruff"
+    assert py_entry["roadmap_priority"] == 2
+
+
+def test_adapter_environment_readiness_check():
+    from app.adapters.base import adapter_registry
+    readiness = adapter_registry.check_all_readiness()
+    assert "java" in readiness
+    assert "python" in readiness
+    assert "ready" in readiness["java"]
+
+
+
 

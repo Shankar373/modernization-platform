@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 
-from app.adapters.base import MigrationAdapter
+from app.adapters.base import MigrationAdapter, adapter_registry
 from app.adapters.java.adapter import JavaOpenRewriteAdapter
 from app.adapters.python.adapter import PythonRuffAdapter
 from app.adapters.typescript.adapter import TypeScriptAdapter
@@ -59,6 +59,8 @@ _ADAPTERS: list[MigrationAdapter] = [
     ShellAdapter(),
     GenericFallbackAdapter(),
 ]
+
+adapter_registry.register_all(_ADAPTERS)
 
 
 _SKIP_SCAN_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git",
@@ -479,10 +481,8 @@ class MigrationOrchestrator:
     def _find_adapter(self, language: Optional[str]) -> Optional[MigrationAdapter]:
         if not language:
             return None
-        for adapter in _ADAPTERS:
-            if adapter.language.lower() == language.lower():
-                return adapter
-        return None
+        return adapter_registry.get_by_language(language)
+
 
     def _find_adapter_for_plan(self, plan: Optional[MigrationPlan]) -> Optional[MigrationAdapter]:
         """Route to adapter by targets[0].language; fall back to steps[0].adapter."""

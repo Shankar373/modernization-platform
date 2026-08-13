@@ -89,6 +89,39 @@ class MigrationAdapter(ABC):
         """Migration tool provider (e.g., 'openrewrite', 'ruff')."""
         ...
 
+    @property
+    def engine(self) -> str:
+        """Human-readable transformation engine name (e.g., 'OpenRewrite', 'LibCST + Ruff', 'Roslyn')."""
+        return self.provider
+
+    @property
+    def required_tools(self) -> List[str]:
+        """CLI tool binaries required by this adapter (e.g., ['mvn'], ['ruff'])."""
+        return []
+
+    @property
+    def roadmap_priority(self) -> int:
+        """Priority index according to target roadmap (1..8, 99 for formatters/auxiliary)."""
+        return 99
+
+    @property
+    def maturity(self) -> str:
+        """Adapter execution maturity ('PRODUCTION', 'STABLE', 'EXPERIMENTAL', 'STUB', 'PLANNED')."""
+        return "STABLE"
+
+    def check_environment_readiness(self) -> dict:
+        """Check if required CLI binaries exist in the system PATH."""
+        import shutil
+        missing = [tool for tool in self.required_tools if shutil.which(tool) is None]
+        return {
+            "ready": len(missing) == 0,
+            "missing_tools": missing,
+            "required_tools": self.required_tools,
+            "engine": self.engine,
+            "maturity": self.maturity,
+        }
+
+
     @abstractmethod
     def detect(self, workspace_path: str) -> bool:
         """
@@ -156,3 +189,79 @@ class MigrationAdapter(ABC):
         Must not report SUCCESS unless validation actually passed.
         """
         ...
+
+
+class AdapterRegistry:
+    """
+    Centralized registry managing modernization engine adapters,
+    roadmap priority ordering, and environment binary readiness checks.
+    """
+
+    def __init__(self):
+        self._adapters: List[MigrationAdapter] = []
+
+    def register(self, adapter: MigrationAdapter) -> None:
+        """Register a new language migration adapter."""
+        for idx, existing in enumerate(self._adapters):
+            if existing.language.lower() == adapter.language.lower():
+                self._adapters[idx] = adapter
+                return
+        self._adapters.append(adapter)
+
+    def register_all(self, adapters: List[MigrationAdapter]) -> None:
+        """Register a list of language migration adapters."""
+        for adapter in adapters:
+            self.register(adapter)
+
+    def get_by_language(self, language: str) -> Optional[MigrationAdapter]:
+        """Find the registered adapter for a given language."""
+        if not language:
+            return None
+        lang_lower = language.lower()
+        for adapter in self._adapters:
+            if adapter.language.lower() == lang_lower:
+                return adapter
+        return None
+
+    def get_by_engine(self, engine_name: str) -> Optional[MigrationAdapter]:
+        """Find adapter matching engine name (case-insensitive substring or exact)."""
+        if not engine_name:
+            return None
+        eng_lower = engine_name.lower()
+        for adapter in self._adapters:
+            if eng_lower in adapter.engine.lower():
+                return adapter
+        return None
+
+    def get_all(self) -> List[MigrationAdapter]:
+        """Return all registered adapters."""
+        return list(self._adapters)
+
+    def get_roadmap_status(self) -> List[dict]:
+        """
+        Return all registered adapters sorted by roadmap priority (1..8).
+        """
+        sorted_adapters = sorted(self._adapters, key=lambda a: (a.roadmap_priority, a.language))
+        return [
+            {
+                "language": a.language,
+                "provider": a.provider,
+                "engine": a.engine,
+                "roadmap_priority": a.roadmap_priority,
+                "maturity": a.maturity,
+                "required_tools": a.required_tools,
+            }
+            for a in sorted_adapters
+        ]
+
+    def check_all_readiness(self) -> dict:
+        """Check system tool readiness across all registered adapters."""
+        return {
+            adapter.language: adapter.check_environment_readiness()
+            for adapter in self._adapters
+        }
+
+
+# Global singleton adapter registry
+adapter_registry = AdapterRegistry()
+

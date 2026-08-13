@@ -66,6 +66,23 @@ class PythonRuffAdapter(MigrationAdapter):
     def provider(self) -> str:
         return "ruff"
 
+    @property
+    def engine(self) -> str:
+        return "LibCST + Ruff"
+
+    @property
+    def required_tools(self) -> List[str]:
+        return ["ruff", "python"]
+
+    @property
+    def roadmap_priority(self) -> int:
+        return 2
+
+    @property
+    def maturity(self) -> str:
+        return "STABLE"
+
+
     # ── Detection ─────────────────────────────────────────────────────────────
 
     def detect(self, workspace_path: str) -> bool:

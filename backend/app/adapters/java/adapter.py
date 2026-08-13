@@ -62,6 +62,23 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
     def provider(self) -> str:
         return "openrewrite"
 
+    @property
+    def engine(self) -> str:
+        return "OpenRewrite"
+
+    @property
+    def required_tools(self) -> List[str]:
+        return ["mvn"]
+
+    @property
+    def roadmap_priority(self) -> int:
+        return 1
+
+    @property
+    def maturity(self) -> str:
+        return "PRODUCTION"
+
+
     # ── Detection ─────────────────────────────────────────────────────────────
 
     def detect(self, workspace_path: str) -> bool:

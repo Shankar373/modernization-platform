@@ -129,6 +129,23 @@ class TypeScriptAdapter(MigrationAdapter):
     def provider(self) -> str:
         return "ts-modernizer"
 
+    @property
+    def engine(self) -> str:
+        return "jscodeshift / Babel + TypeScript Compiler API"
+
+    @property
+    def required_tools(self) -> List[str]:
+        return ["tsc", "node"]
+
+    @property
+    def roadmap_priority(self) -> int:
+        return 4
+
+    @property
+    def maturity(self) -> str:
+        return "PARTIAL"
+
+
     def detect(self, workspace_path: str) -> bool:
         return any(self._iter(Path(workspace_path)))
 
