@@ -19,6 +19,9 @@ AsyncSessionLocal = sessionmaker(
 
 Base = declarative_base()
 
+# Import models to register them on Base metadata
+from app.db import models
+
 
 async def init_db():
     """Create all tables on startup (dev mode — use Alembic for production)."""

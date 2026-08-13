@@ -2,10 +2,13 @@
 import asyncio
 import traceback
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.orchestration.orchestrator import MigrationOrchestrator
+from app.db.session import get_db
+from app.db.crud import CRUDRepository
 
 router = APIRouter()
 _orchestrator = MigrationOrchestrator()
@@ -22,7 +25,7 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post("/analyze")
-async def analyze_repository(request: AnalyzeRequest):
+async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
     """
     Scan the workspace and return:
     - Technology fingerprint (languages, frameworks, build systems, dependencies)
@@ -56,6 +59,19 @@ async def analyze_repository(request: AnalyzeRequest):
 
         # Cache for subsequent calls
         _analysis_cache[cache_key] = assessment
+
+        # Save profile to Postgres DB
+        try:
+            # Check if profile already exists for project
+            existing_prof = await CRUDRepository.get_project_profile(db, request.project_id)
+            if not existing_prof:
+                await CRUDRepository.create_project_profile(
+                    db=db,
+                    project_id=request.project_id,
+                    profile_data=assessment["profile"],
+                )
+        except Exception:
+            pass
 
         return {
             "project_id": request.project_id,

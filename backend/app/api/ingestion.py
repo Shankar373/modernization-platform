@@ -1,11 +1,11 @@
-"""Repository ingestion API — ZIP upload and Git URL."""
-import os
-from typing import Optional
-
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pathlib import Path
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.application.ingestion_service import IngestionService, SecurityError
+from app.db.session import get_db
+from app.db.crud import CRUDRepository
 
 router = APIRouter()
 _ingestion = IngestionService()
@@ -28,6 +28,7 @@ class IngestResponse(BaseModel):
 async def ingest_zip(
     file: UploadFile = File(...),
     project_name: str = Form(default="unnamed"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Upload a ZIP archive for analysis."""
     if not file.filename or not file.filename.endswith(".zip"):
@@ -48,6 +49,16 @@ async def ingest_zip(
         except Exception:
             pass
 
+        # Save project to DB
+        await CRUDRepository.create_project(
+            db=db,
+            project_id=project_id,
+            name=effective_name,
+            source_type="zip",
+            source_path=file.filename or "uploaded.zip",
+            workspace_path=workspace_path,
+        )
+
         return IngestResponse(
             project_id=project_id,
             workspace_path=workspace_path,
@@ -62,7 +73,7 @@ async def ingest_zip(
 
 
 @router.post("/ingest/git", response_model=IngestResponse)
-async def ingest_git(request: GitIngestRequest):
+async def ingest_git(request: GitIngestRequest, db: AsyncSession = Depends(get_db)):
     """Clone a Git repository for analysis."""
     try:
         # Extract repo name from Git URL (e.g. https://github.com/user/my-repo.git -> my-repo)
@@ -77,6 +88,16 @@ async def ingest_git(request: GitIngestRequest):
             (Path(workspace_path) / ".project_name").write_text(effective_name, encoding="utf-8")
         except Exception:
             pass
+
+        # Save project to DB
+        await CRUDRepository.create_project(
+            db=db,
+            project_id=project_id,
+            name=effective_name,
+            source_type="git",
+            source_path=request.git_url,
+            workspace_path=workspace_path,
+        )
 
         return IngestResponse(
             project_id=project_id,

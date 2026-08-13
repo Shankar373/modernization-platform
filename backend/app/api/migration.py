@@ -8,19 +8,22 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.domain.models import MigrationProfile
 from app.core.orchestration.orchestrator import MigrationOrchestrator
 from app.discovery.scanner import UniversalScanner
+from app.db.session import get_db
+from app.db.crud import CRUDRepository
 
 router = APIRouter()
 _orchestrator = MigrationOrchestrator()
 _scanner = UniversalScanner()
 
-# In-memory stores (replace with DB in production)
+# In-memory caches (gradually migrating state to database)
 _plans: dict = {}
 _results: dict = {}
 _dry_run_all_results: dict = {}   # stores dry-run-all previews keyed by project_id
@@ -66,7 +69,7 @@ class ApproveAndExecuteRequest(BaseModel):
 
 
 @router.post("/migration/plan")
-async def create_migration_plan(request: PlanRequest):
+async def create_migration_plan(request: PlanRequest, db: AsyncSession = Depends(get_db)):
     """Create a migration plan for the workspace."""
     try:
         profile = _scanner.scan(request.workspace_path)
@@ -82,6 +85,21 @@ async def create_migration_plan(request: PlanRequest):
                 status_code=400,
                 detail=f"No migration adapter available for language: {request.language}",
             )
+        
+        # Save to DB
+        await CRUDRepository.create_migration_plan(
+            db=db,
+            plan_id=plan.plan_id,
+            project_id=request.project_id,
+            profile=request.migration_profile.value,
+            targets=[t.model_dump() for t in plan.targets],
+            steps=[s.model_dump() for s in plan.steps],
+            selected_capabilities=plan.selected_capabilities,
+            overall_risk=plan.overall_risk.value,
+            dry_run_available=plan.dry_run_available,
+            requires_approval=plan.requires_approval,
+        )
+
         _plans[plan.plan_id] = {"plan": plan, "workspace_path": request.workspace_path, "profile": profile}
         return plan.model_dump()
     except HTTPException:
@@ -91,15 +109,37 @@ async def create_migration_plan(request: PlanRequest):
 
 
 @router.post("/migration/dry-run")
-async def dry_run(request: DryRunRequest):
+async def dry_run(request: DryRunRequest, db: AsyncSession = Depends(get_db)):
     """Execute a dry run — preview what would change."""
-    plan_data = _plans.get(request.plan_id)
-    if not plan_data:
-        raise HTTPException(status_code=404, detail="Plan not found.")
+    db_plan = await CRUDRepository.get_migration_plan(db, request.plan_id)
+    if db_plan:
+        from app.core.domain.models import MigrationPlan as ModelMigrationPlan
+        proj = await CRUDRepository.get_project(db, db_plan.project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        workspace_path = proj.workspace_path
+        plan = ModelMigrationPlan(
+            plan_id=db_plan.plan_id,
+            project_id=db_plan.project_id,
+            profile=db_plan.profile,
+            targets=db_plan.targets,
+            steps=db_plan.steps,
+            selected_capabilities=db_plan.selected_capabilities,
+            overall_risk=db_plan.overall_risk,
+            dry_run_available=db_plan.dry_run_available,
+            requires_approval=db_plan.requires_approval,
+        )
+    else:
+        plan_data = _plans.get(request.plan_id)
+        if not plan_data:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+        workspace_path = plan_data["workspace_path"]
+        plan = plan_data["plan"]
+
     try:
         result = _orchestrator.dry_run(
-            workspace_path=plan_data["workspace_path"],
-            plan=plan_data["plan"],
+            workspace_path=workspace_path,
+            plan=plan,
         )
         return result
     except Exception as e:
@@ -107,25 +147,116 @@ async def dry_run(request: DryRunRequest):
 
 
 @router.post("/migration/execute")
-async def execute_migration(request: ExecuteRequest):
+async def execute_migration(request: ExecuteRequest, db: AsyncSession = Depends(get_db)):
     """Execute the migration. Requires explicit approval."""
     if not request.approved:
         raise HTTPException(status_code=400, detail="Migration requires explicit approval (approved=true).")
 
-    plan_data = _plans.get(request.plan_id)
-    if not plan_data:
-        raise HTTPException(status_code=404, detail="Plan not found.")
+    db_plan = await CRUDRepository.get_migration_plan(db, request.plan_id)
+    if db_plan:
+        from app.core.domain.models import MigrationPlan as ModelMigrationPlan
+        proj = await CRUDRepository.get_project(db, db_plan.project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        workspace_path = proj.workspace_path
+        plan = ModelMigrationPlan(
+            plan_id=db_plan.plan_id,
+            project_id=db_plan.project_id,
+            profile=db_plan.profile,
+            targets=db_plan.targets,
+            steps=db_plan.steps,
+            selected_capabilities=db_plan.selected_capabilities,
+            overall_risk=db_plan.overall_risk,
+            dry_run_available=db_plan.dry_run_available,
+            requires_approval=db_plan.requires_approval,
+        )
+    else:
+        plan_data = _plans.get(request.plan_id)
+        if not plan_data:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+        workspace_path = plan_data["workspace_path"]
+        plan = plan_data["plan"]
 
     try:
+        # Create stage status
+        await CRUDRepository.create_migration_stage(
+            db=db,
+            project_id=plan.project_id,
+            stage_name="TRANSFORMATION",
+            status="RUNNING",
+        )
+
         # Run blocking migration in a thread so the event loop stays free (fixes WinError 64)
         result = await asyncio.to_thread(
             _orchestrator.migrate,
-            plan_data["workspace_path"],
-            plan_data["plan"],
+            workspace_path,
+            plan,
         )
-        _results[result.result_id] = {"result": result, "plan_data": plan_data}
+
+        # Save result to DB
+        await CRUDRepository.create_migration_run(
+            db=db,
+            result_id=result.result_id,
+            job_id=result.job_id,
+            project_id=result.project_id,
+            plan_id=result.plan_id,
+            status=result.status.value,
+            statistics=result.statistics.model_dump(),
+            changed_files=[f.model_dump() for f in result.changed_files],
+            timeline=result.timeline,
+            warnings=result.warnings,
+            manual_remediation=result.manual_remediation,
+            logs=result.logs,
+            output_bundle_path=result.output_bundle_path,
+        )
+
+        # Complete stage status
+        await CRUDRepository.create_migration_stage(
+            db=db,
+            project_id=plan.project_id,
+            run_id=result.result_id,
+            stage_name="TRANSFORMATION",
+            status=result.status.value,
+            logs=str(result.logs),
+        )
+
+        # Create BuildResult entry
+        await CRUDRepository.create_build_result(
+            db=db,
+            run_id=result.result_id,
+            success=result.statistics.build_passed if result.statistics.build_passed is not None else True,
+            command="build",
+            output=result.logs.get("validation", ""),
+        )
+
+        # Create TestResult entry
+        await CRUDRepository.create_test_result(
+            db=db,
+            run_id=result.result_id,
+            success=result.statistics.tests_failed == 0 if result.statistics.tests_total > 0 else True,
+            command="test",
+            total_tests=result.statistics.tests_total,
+            passed_tests=result.statistics.tests_passed,
+            failed_tests=result.statistics.tests_failed,
+            output=result.logs.get("validation", ""),
+        )
+
+        # Save to local cache
+        _results[result.result_id] = {"result": result, "plan_data": {"workspace_path": workspace_path, "plan": plan}}
         return result.model_dump()
     except Exception as e:
+        # Create error log entry
+        try:
+            await CRUDRepository.create_migration_error(
+                db=db,
+                run_id=result.result_id if 'result' in locals() else str(uuid.uuid4()),
+                stage="TRANSFORMATION",
+                error_type=type(e).__name__,
+                message=str(e),
+                traceback=traceback.format_exc(),
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"Migration failed: {e}\n{traceback.format_exc()[:800]}")
 
 
@@ -221,8 +352,26 @@ async def migrate_all(request: MigrateAllRequest):
 
 
 @router.get("/migration/result/{result_id}")
-async def get_result(result_id: str):
+async def get_result(result_id: str, db: AsyncSession = Depends(get_db)):
     """Get a migration result by ID."""
+    db_run = await CRUDRepository.get_migration_run(db, result_id)
+    if db_run:
+        return {
+            "result_id": db_run.result_id,
+            "job_id": db_run.job_id,
+            "project_id": db_run.project_id,
+            "plan_id": db_run.plan_id,
+            "status": db_run.status,
+            "completed_at": db_run.completed_at.isoformat() if db_run.completed_at else None,
+            "statistics": db_run.statistics,
+            "changed_files": db_run.changed_files,
+            "timeline": db_run.timeline,
+            "warnings": db_run.warnings,
+            "manual_remediation": db_run.manual_remediation,
+            "logs": db_run.logs,
+            "output_bundle_path": db_run.output_bundle_path,
+        }
+
     result_data = _results.get(result_id)
     if not result_data:
         raise HTTPException(status_code=404, detail="Result not found.")
@@ -230,8 +379,68 @@ async def get_result(result_id: str):
 
 
 @router.get("/migration/result/{result_id}/report")
-async def get_report(result_id: str):
+async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
     """Generate and return the migration report."""
+    db_run = await CRUDRepository.get_migration_run(db, result_id)
+    if db_run:
+        proj = await CRUDRepository.get_project(db, db_run.project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        workspace_path = proj.workspace_path
+        
+        # Build pydantic models from db
+        from app.core.domain.models import MigrationResult as ModelMigrationResult, MigrationStatistics, FileChangeMetadata
+        result = ModelMigrationResult(
+            result_id=db_run.result_id,
+            job_id=db_run.job_id,
+            project_id=db_run.project_id,
+            plan_id=db_run.plan_id,
+            status=db_run.status,
+            completed_at=db_run.completed_at,
+            statistics=MigrationStatistics(**db_run.statistics),
+            changed_files=[FileChangeMetadata(**f) for f in db_run.changed_files],
+            timeline=db_run.timeline,
+            warnings=db_run.warnings,
+            manual_remediation=db_run.manual_remediation,
+            logs=db_run.logs,
+            output_bundle_path=db_run.output_bundle_path,
+        )
+        
+        # Optionally retrieve plan if it exists
+        plan = None
+        db_plan = await CRUDRepository.get_migration_plan(db, db_run.plan_id)
+        if db_plan:
+            from app.core.domain.models import MigrationPlan as ModelMigrationPlan
+            plan = ModelMigrationPlan(
+                plan_id=db_plan.plan_id,
+                project_id=db_plan.project_id,
+                profile=db_plan.profile,
+                targets=db_plan.targets,
+                steps=db_plan.steps,
+                selected_capabilities=db_plan.selected_capabilities,
+                overall_risk=db_plan.overall_risk,
+                dry_run_available=db_plan.dry_run_available,
+                requires_approval=db_plan.requires_approval,
+            )
+        
+        try:
+            report = _orchestrator.generate_report(
+                workspace_path=workspace_path,
+                plan=plan,
+                result=result,
+            )
+            # Save report to DB
+            await CRUDRepository.create_migration_report(
+                db=db,
+                run_id=result_id,
+                risk_level=report.get("overall_risk", "MEDIUM"),
+                summary=report.get("summary", ""),
+                full_report_json=report,
+            )
+            return report
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
+
     result_data = _results.get(result_id)
     if not result_data:
         raise HTTPException(status_code=404, detail="Result not found.")
@@ -247,8 +456,16 @@ async def get_report(result_id: str):
 
 
 @router.get("/migration/result/{result_id}/files")
-async def get_changed_files(result_id: str):
+async def get_changed_files(result_id: str, db: AsyncSession = Depends(get_db)):
     """Return the list of changed files with diffs."""
+    db_run = await CRUDRepository.get_migration_run(db, result_id)
+    if db_run:
+        return {
+            "result_id": result_id,
+            "changed_files": db_run.changed_files,
+            "statistics": db_run.statistics,
+        }
+
     result_data = _results.get(result_id)
     if not result_data:
         raise HTTPException(status_code=404, detail="Result not found.")
@@ -295,17 +512,26 @@ def _resolve_project_name(ws: Path, result_obj: any) -> str:
 
 
 @router.get("/migration/result/{result_id}/download")
-async def download_modernized_zip(result_id: str):
+async def download_modernized_zip(result_id: str, db: AsyncSession = Depends(get_db)):
     """
     Download the modernized workspace as a ZIP file.
     The workspace contains all files after migration has been applied.
     """
-    result_data = _results.get(result_id)
-    if not result_data:
-        raise HTTPException(status_code=404, detail="Result not found or server was restarted. Please re-run the migration.")
+    db_run = await CRUDRepository.get_migration_run(db, result_id)
+    if db_run:
+        proj = await CRUDRepository.get_project(db, db_run.project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        workspace_path = proj.workspace_path
+        result_obj = db_run
+    else:
+        result_data = _results.get(result_id)
+        if not result_data:
+            raise HTTPException(status_code=404, detail="Result not found or server was restarted. Please re-run the migration.")
+        workspace_path = result_data["plan_data"].get("workspace_path", "")
+        result_obj = result_data.get("result")
 
     try:
-        workspace_path = result_data["plan_data"].get("workspace_path", "")
         ws = Path(workspace_path)
         if not ws.exists():
             raise HTTPException(status_code=404, detail="Workspace no longer exists — it may have been cleaned up.")
@@ -314,7 +540,7 @@ async def download_modernized_zip(result_id: str):
         _SKIP_IN_ZIP_STARTS = {".git", ".venv", "venv", ".venv-broken"}
 
         # Resolve project name early so we can use it as the root folder prefix
-        raw_name_pre = _resolve_project_name(ws, result_data.get("result"))
+        raw_name_pre = _resolve_project_name(ws, result_obj)
         clean_root = re.sub(r'[\(\)\s]+', '-', raw_name_pre).strip('-')
         clean_root = re.sub(r'[^a-zA-Z0-9_\-]', '', clean_root) or "application"
         # Remove any trailing -1 from ZIP filenames like 'architecture-discovery-main--1-'
@@ -345,7 +571,6 @@ async def download_modernized_zip(result_id: str):
             filename = f"{clean_root}.zip"
         else:
             filename = f"{clean_root}-modernized.zip"
-
 
         return StreamingResponse(
             buf,
