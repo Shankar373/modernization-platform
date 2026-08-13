@@ -456,5 +456,25 @@ def test_adapter_environment_readiness_check():
     assert "ready" in readiness["java"]
 
 
+def test_python_libcst_ast_transformations():
+    from app.adapters.python.adapter import LibCSTSyntaxTransformer
+    transformer = LibCSTSyntaxTransformer()
+
+    # Python 3.10+ target converts Optional[T] -> T | None
+    code_optional = "def process(val: Optional[str]) -> Optional[int]: pass"
+    res_optional = transformer.transform_code(code_optional, target_version="3.10")
+    assert res_optional == "def process(val: str | None) -> int | None: pass"
+
+    # Python 3.10+ target converts Union[T1, T2] -> T1 | T2
+    code_union = "def calculate(arg: Union[int, float]) -> Union[str, bytes]: pass"
+    res_union = transformer.transform_code(code_union, target_version="3.11")
+    assert res_union == "def calculate(arg: int | float) -> str | bytes: pass"
+
+    # Legacy Python target (e.g. 3.8) preserves Union/Optional compatibility
+    res_legacy = transformer.transform_code(code_optional, target_version="3.8")
+    assert res_legacy == code_optional
+
+
+
 
 
