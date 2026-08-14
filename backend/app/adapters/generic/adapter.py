@@ -25,6 +25,7 @@ _KNOWN_EXTS = {
     ".json", ".yaml", ".yml", ".md", ".markdown",
     ".go", ".php", ".sh", ".bash", ".zsh",
     ".cs", ".csproj", ".sln", ".xaml", ".vb",  # .NET/C# adapters
+    ".config",  # web.config / app.config / packages.config (NuGet, IIS)
     ".xml", ".pom",  # java/openrewrite (pom.xml) + .NET configs
 }
 

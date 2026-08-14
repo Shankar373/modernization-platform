@@ -7,6 +7,7 @@ import {
   getRecipeRecommendations,
   analyzeRecipeConflicts,
   generateMigrationPlan,
+  executeRecipes,
   createGitCheckpoint,
   downloadCheckpointZip,
 } from '../api/client';
@@ -32,6 +33,7 @@ type StageKey =
   | 'conflict-resolution'
   | 'plan'
   | 'checkpointing'
+  | 'executing-recipes'
   | 'done';
 
 interface Step {
@@ -55,7 +57,8 @@ const STEPS: Step[] = [
   { key: 'conflict-resolution',number: 10, title: 'Conflict Resolution',       icon: '⚡', auto: false },
   { key: 'plan',               number: 11, title: 'Migration Plan',            icon: '🗺️', auto: false },
   { key: 'checkpointing',      number: 12, title: 'Git Checkpoint',            icon: '🎯', auto: true  },
-  { key: 'done',               number: 12, title: 'Git Checkpoint',            icon: '✅', auto: true  },
+  { key: 'executing-recipes',  number: 13, title: 'Execute Recipes',           icon: '🛠️', auto: true  },
+  { key: 'done',               number: 13, title: 'Execute Recipes',           icon: '✅', auto: true  },
 ];
 
 const DISPLAY_STEPS = STEPS.filter(s => s.key !== 'done');
@@ -718,6 +721,126 @@ function PlanStep({ plan, onContinue }: { plan: MigrationPlan | null; onContinue
   );
 }
 
+function CheckingStep({ label, result, error }: { label: string; result: unknown; error: string | null }) {
+  if (error) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+        <h3 style={{ marginBottom: 12 }}>Step Failed</h3>
+        <p style={{ color: '#fca5a5', marginBottom: 16 }}>{error}</p>
+      </div>
+    );
+  }
+  if (!result) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <div style={{ fontSize: 48, marginBottom: 20 }}>⚙️</div>
+        <Spinner size={36} />
+        <p style={{ marginTop: 16, color: 'var(--text-muted)' }}>{label}</p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ textAlign: 'center', padding: 60 }}>
+      <div style={{ fontSize: 48, marginBottom: 20 }}>✅</div>
+      <p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Completed.</p>
+    </div>
+  );
+}
+
+function RecipeExecuteStep({ result, error }: { result: any; error: string | null }) {
+  if (error) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+        <h3 style={{ marginBottom: 12 }}>Recipe Execution Failed</h3>
+        <p style={{ color: '#fca5a5', marginBottom: 16 }}>{error}</p>
+      </div>
+    );
+  }
+  if (!result) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <div style={{ fontSize: 48, marginBottom: 20 }}>🛠️</div>
+        <Spinner size={36} />
+        <p style={{ marginTop: 16, color: 'var(--text-muted)' }}>Applying selected recipe transformations to your workspace…</p>
+      </div>
+    );
+  }
+  const executed = result.recipes_executed ?? 0;
+  const files = result.files_changed ?? 0;
+  const findings = result.findings_count ?? 0;
+  return (
+    <div className="animate-fade-up">
+      <div style={{ padding: 24, borderRadius: 12, background: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(29,127,138,0.1))', border: '1px solid rgba(16,185,129,0.25)', marginBottom: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 56, marginBottom: 12 }}>🛠️</div>
+        <h2 style={{ marginBottom: 8, fontSize: 22 }}>Recipe Transformations Applied</h2>
+        <p className="text-muted">Code changes have been written to the workspace.</p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+        <InfoCard icon="✅" label="Recipes Executed" value={executed.toString()} />
+        <InfoCard icon="📝" label="Files Changed" value={files.toString()} />
+        <InfoCard icon={findings > 0 ? '🔐' : '✅'} label="Security Findings" value={findings.toString()} />
+      </div>
+
+      {(result.recipes_not_implemented?.length > 0 || result.recipes_failed?.length > 0) && (
+        <div style={{ padding: 12, background: 'rgba(239,68,68,0.08)', borderRadius: 8, marginBottom: 20, border: '1px solid rgba(239,68,68,0.25)' }}>
+          <h4 style={{ color: '#fca5a5', fontSize: 13, marginBottom: 6 }}>Some recipes were not applied</h4>
+          {result.recipes_not_implemented?.length > 0 && (
+            <p className="text-muted text-sm" style={{ fontSize: 13 }}>No handler: {result.recipes_not_implemented.join(', ')}</p>
+          )}
+          {result.recipes_failed?.length > 0 && (
+            <p className="text-muted text-sm" style={{ fontSize: 13 }}>Failed: {result.recipes_failed.join(', ')}</p>
+          )}
+        </div>
+      )}
+
+      {result.recipes?.map((r: any) => (
+        <div className="card" style={{ marginBottom: 14 }} key={r.recipe_id}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>{r.recipe_name}</span>
+            <Badge text={r.status} color={r.status === 'EXECUTED' ? '#10b981' : r.status === 'FAILED' ? '#ef4444' : '#f59e0b'} />
+          </div>
+          {r.changed_files?.length > 0 && (
+            <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6 }}>
+              {r.changed_files.map((c: any) => (
+                <div key={c.file} style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 12, borderBottom: '1px solid rgba(0,0,0,0.05)', color: '#10b981' }}>
+                  {c.status === 'ADDED' ? '➕' : '✏️'} {c.file}
+                </div>
+              ))}
+            </div>
+          )}
+          {r.findings?.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Security Findings</p>
+              {r.findings.map((f: any, i: number) => (
+                <div key={i} style={{ display: 'flex', gap: 10, padding: '6px 0', fontSize: 13, alignItems: 'flex-start' }}>
+                  <Badge text={f.severity} color={f.severity === 'CRITICAL' || f.severity === 'HIGH' ? '#ef4444' : '#f59e0b'} />
+                  <div>
+                    <span>{f.message}</span>
+                    <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{f.file}: {f.evidence}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.notes?.map((n: string) => (
+            <p key={n} style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 6 }}>{n}</p>
+          ))}
+        </div>
+      ))}
+
+      <div style={{ padding: 16, borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', marginBottom: 20 }}>
+        <h4 style={{ color: '#10b981', marginBottom: 8, fontSize: 14 }}>✅ Recipe execution complete</h4>
+        <p className="text-muted text-sm">
+          {result.mode === 'dry-run' ? 'Dry-run preview — no files were modified.' : 'Transformations written to the workspace.'} Review the diffs below and then download the workspace.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function CheckpointStep({
   result,
   error,
@@ -959,17 +1082,34 @@ export default function Pipeline() {
     })
       .then(res => {
         setCheckpointResult(res.data);
-        setTimeout(() => go('done'), 1000);
+        setTimeout(() => go('executing-recipes'), 1000);
       })
       .catch(e => {
         setCheckpointError(e?.response?.data?.detail || e.message || 'Checkpoint failed.');
       });
   }, [stage]);
 
+  const [recipeRun, setRecipeRun] = useState<any>(null);
+  const [recipeRunError, setRecipeRunError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (stage !== 'executing-recipes' || recipeRun !== null || recipeRunError !== null || !workspacePath || !projectId) return;
+    executeRecipes({
+      project_id: projectId,
+      workspace_path: workspacePath,
+      recipe_ids: Array.from(selectedRecipeIds),
+    })
+      .then(res => {
+        setRecipeRun(res.data);
+        setTimeout(() => go('done'), 1500);
+      })
+      .catch(e => setRecipeRunError(e?.response?.data?.detail || e.message || 'Recipe execution failed.'));
+  }, [stage]);
+
   const stageOrder: StageKey[] = [
     'discovery', 'profile', 'dep-detection', 'version-detection', 'dep-review',
     'dep-applying', 'ai-recommending', 'recipe-selection', 'recipe-analyzing',
-    'conflict-resolution', 'plan', 'checkpointing', 'done',
+    'conflict-resolution', 'plan', 'checkpointing', 'executing-recipes', 'done',
   ];
   const currentIdx = stageOrder.indexOf(stage);
 
@@ -987,7 +1127,8 @@ export default function Pipeline() {
       9: ['recipe-analyzing'],
       10: ['conflict-resolution'],
       11: ['plan'],
-      12: ['checkpointing', 'done'],
+      12: ['checkpointing'],
+      13: ['executing-recipes', 'done'],
     };
     const stages = stepStages[step.number] || [];
     if (stages.includes(stage)) return 'active';
@@ -1058,6 +1199,20 @@ export default function Pipeline() {
       case 'plan':
         return <PlanStep plan={plan} onContinue={() => go('checkpointing')} />;
       case 'checkpointing':
+        return (
+          <CheckingStep
+            label="Creating git checkpoint…"
+            result={checkpointResult}
+            error={checkpointError}
+          />
+        );
+      case 'executing-recipes':
+        return (
+          <RecipeExecuteStep
+            result={recipeRun}
+            error={recipeRunError}
+          />
+        );
       case 'done':
         return (
           <CheckpointStep

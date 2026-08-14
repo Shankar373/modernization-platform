@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     sandbox_timeout_seconds: int = 600
 
     # Upload limits
-    max_upload_size_mb: int = 100
+    max_upload_size_mb: int = 1024
     max_archive_ratio: int = 50
 
     # AI / LLM

@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.recipes.executor import get_executor_help, run_recipe
+
 router = APIRouter()
 
 # ── Recipe Catalog ─────────────────────────────────────────────────────────────
@@ -664,3 +666,52 @@ async def generate_migration_plan(req: PlanRequest):
     }
 
     return {"plan": plan}
+
+
+class ExecuteRequest(BaseModel):
+    project_id: str
+    workspace_path: str
+    recipe_ids: List[str] = Field(default_factory=list)
+    dry_run: bool = False
+
+
+@router.post("/recipes/execute")
+async def execute_recipes(req: ExecuteRequest):
+    """
+    Execute the selected recipes for real: applies transformations to the
+    workspace and returns per-recipe changed files + security findings.
+    Use dry_run=true to preview without modifying files.
+    """
+    if not req.recipe_ids:
+        return {"recipes": [], "summary": "No recipes selected."}
+
+    results = []
+    implemented = 0
+    for rid in req.recipe_ids:
+        recipe = _CATALOG_BY_ID.get(rid)
+        name = recipe["name"] if recipe else rid
+        result = run_recipe(rid, name, req.workspace_path, dry_run=req.dry_run)
+        if result.status == "EXECUTED":
+            implemented += 1
+        results.append(result.to_dict())
+
+    total_files_changed = sum(len(r["changed_files"]) for r in results)
+    total_findings = sum(len(r["findings"]) for r in results)
+    failed = [r["recipe_id"] for r in results if r["status"] == "FAILED"]
+    not_impl = [r["recipe_id"] for r in results if r["status"] == "NOT_IMPLEMENTED"]
+
+    return {
+        "recipes": results,
+        "mode": "dry-run" if req.dry_run else "apply",
+        "recipes_executed": implemented,
+        "recipes_not_implemented": not_impl,
+        "recipes_failed": failed,
+        "files_changed": total_files_changed,
+        "findings_count": total_findings,
+        "implemented_recipe_ids": sorted(get_executor_help()),
+        "summary": (
+            f"{implemented} recipe(s) executed, {len(not_impl)} not implemented, "
+            f"{len(failed)} failed. {total_files_changed} file(s) affected, "
+            f"{total_findings} security finding(s)."
+        ),
+    }

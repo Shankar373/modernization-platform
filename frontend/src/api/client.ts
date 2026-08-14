@@ -159,6 +159,14 @@ export const generateMigrationPlan = (data: {
   approved_dep_updates: unknown[];
 }) => API.post('/recipes/plan', data);
 
+/** Execute selected recipes for real (apply transformations to the workspace). */
+export const executeRecipes = (data: {
+  project_id: string;
+  workspace_path: string;
+  recipe_ids: string[];
+  dry_run?: boolean;
+}) => API.post('/recipes/execute', data);
+
 // ── Git Checkpoint ─────────────────────────────────────────────────────────────
 
 /** Create a git checkpoint (commit) in the workspace. */
