@@ -133,7 +133,6 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
 
             if detected_unsupported:
                 err_msg = f"Unsupported project language(s): {detected_unsupported}."
-                await run_stage_event("DISCOVERY", 1, "FAILED", err_msg)
                 await CRUDRepository.create_migration_error(
                     db=db,
                     run_id=result_id,
@@ -142,6 +141,7 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                     message=err_msg,
                     traceback=None
                 )
+                await run_stage_event("DISCOVERY", 1, "FAILED", err_msg)
                 return
 
             worker_type = "Generic Worker"

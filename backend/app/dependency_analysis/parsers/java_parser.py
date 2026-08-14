@@ -44,7 +44,6 @@ def parse_pom_xml(file_path: str) -> List[Dependency]:
         group_id    = m.group(1).strip()
         artifact_id = m.group(2).strip()
         raw_version = m.group(3).strip() if m.group(3) else None
-        scope       = m.group(4).strip() if m.group(4) else None
 
         # Build canonical Maven coordinate as the dependency name
         name = f"{group_id}:{artifact_id}"

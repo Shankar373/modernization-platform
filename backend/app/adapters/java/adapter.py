@@ -7,7 +7,6 @@ Uses OpenRewrite for deterministic, recipe-driven code transformations.
 from __future__ import annotations
 
 import difflib
-import json
 import os
 import shutil
 import subprocess
@@ -24,7 +23,6 @@ from app.adapters.base import (
 )
 from app.core.domain.models import (
     CapabilityStatus,
-    DetectionEvidence,
     FileChangeMetadata,
     MigrationCapability,
     MigrationPlan,
@@ -259,16 +257,6 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
         return RiskLevel.LOW
 
     # ── Dry Run ───────────────────────────────────────────────────────────────
-
-    def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
-        """
-        Execute OpenRewrite in dry-run mode to preview changes without modifying files.
-        """
-        generator = RewriteYmlGenerator()
-        rewrite_yml_path = generator.generate(
-            workspace_path=workspace_path,
-            plan=plan,
-        )
 
     def _get_mvn_cmd(self, workspace_path: str) -> Optional[str]:
         """Find Maven binary: workspace wrapper (mvnw.cmd / mvnw) or system mvn.

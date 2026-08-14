@@ -130,3 +130,26 @@ def test_py_fstrings_convert(ws: Path):
     res = run_recipe("py-f-strings", "fstrings", str(ws), dry_run=False)
     txt = (ws / "f.py").read_text(encoding="utf-8")
     assert 'name = f"{first} {last}"' in txt
+
+
+def test_py_fstrings_bare_slots_map_in_order(ws: Path):
+    (ws / "f.py").write_text('name = "{} {}".format(first, last)\n', encoding="utf-8")
+    res = run_recipe("py-f-strings", "fstrings", str(ws), dry_run=False)
+    txt = (ws / "f.py").read_text(encoding="utf-8")
+    assert 'name = f"{first} {last}"' in txt
+
+
+def test_py_fstrings_mixed_numbered_and_bare(ws: Path):
+    (ws / "f.py").write_text('name = "{0} {}".format(first, last)\n', encoding="utf-8")
+    res = run_recipe("py-f-strings", "fstrings", str(ws), dry_run=False)
+    txt = (ws / "f.py").read_text(encoding="utf-8")
+    assert 'name = f"{first} {last}"' in txt
+
+
+def test_ts_strict_mode_reports_real_diff(ws: Path):
+    (ws / "tsconfig.json").write_text(json.dumps({"compilerOptions": {}}), encoding="utf-8")
+    res = run_recipe("ts-strict-mode", "strict", str(ws), dry_run=True)
+    assert len(res.changed_files) == 1
+    cf = res.changed_files[0]
+    assert cf.before_content != cf.after_content
+    assert '"strict": true' in cf.after_content

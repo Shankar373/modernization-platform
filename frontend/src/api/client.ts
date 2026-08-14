@@ -75,19 +75,22 @@ export const approveAndExecute = (
   });
 
 /**
- * Run the full dependency analysis pipeline on a workspace.
- * Detects dependency files, queries registries for latest stable versions,
- * compares, generates update plan, applies updates, and validates.
+ * Run the dependency analysis pipeline on a workspace WITHOUT writing files
+ * (plan-only). Detects dependency files, queries registries, compares, and
+ * returns the update plan. Actual disk writes happen only via
+ * `applyDependencyUpdates`.
  */
 export const runDependencyAnalysis = (
   workspacePath: string,
   projectId: string,
-  forceRefresh = false
+  forceRefresh = false,
+  planOnly = true
 ) =>
   API.post('/dependency-analysis', {
     workspace_path: workspacePath,
     project_id: projectId,
     force_refresh: forceRefresh,
+    plan_only: planOnly,
   });
 
 /** Clear the cached dependency analysis result for a workspace. */

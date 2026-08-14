@@ -1,4 +1,5 @@
 from pathlib import Path
+import zipfile
 from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends
 from pydantic import BaseModel
@@ -68,6 +69,9 @@ async def ingest_zip(
         )
     except SecurityError as e:
         raise HTTPException(status_code=400, detail=f"Security error: {e}")
+
+    except zipfile.BadZipFile as e:
+        raise HTTPException(status_code=400, detail=f"Invalid ZIP archive: {e}")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e}")

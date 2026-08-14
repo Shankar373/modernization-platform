@@ -251,7 +251,22 @@ async def approve_and_execute(request: ApproveAndExecuteRequest, db: AsyncSessio
         from datetime import datetime
         result_id = str(uuid.uuid4())
         job_id = str(uuid.uuid4())
-        plan_id = f"all-{result_id}"
+        plan_id = str(uuid.uuid4())
+
+        # Full-application runs have no single-language plan; persist a real
+        # plan row so the run's plan_id FK is satisfied on PostgreSQL.
+        await CRUDRepository.create_migration_plan(
+            db=db,
+            plan_id=plan_id,
+            project_id=request.project_id,
+            profile=request.migration_profile.value,
+            targets=[],
+            steps=[],
+            selected_capabilities=[],
+            overall_risk="MEDIUM",
+            dry_run_available=True,
+            requires_approval=True,
+        )
 
         # Save QUEUED run to database
         await CRUDRepository.create_migration_run(
@@ -309,7 +324,22 @@ async def migrate_all(request: MigrateAllRequest, db: AsyncSession = Depends(get
         from datetime import datetime
         result_id = str(uuid.uuid4())
         job_id = str(uuid.uuid4())
-        plan_id = f"all-{result_id}"
+        plan_id = str(uuid.uuid4())
+
+        # Full-application runs have no single-language plan; persist a real
+        # plan row so the run's plan_id FK is satisfied on PostgreSQL.
+        await CRUDRepository.create_migration_plan(
+            db=db,
+            plan_id=plan_id,
+            project_id=request.project_id,
+            profile=request.migration_profile.value,
+            targets=[],
+            steps=[],
+            selected_capabilities=[],
+            overall_risk="MEDIUM",
+            dry_run_available=True,
+            requires_approval=True,
+        )
 
         # Save QUEUED run to database
         await CRUDRepository.create_migration_run(

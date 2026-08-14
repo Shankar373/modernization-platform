@@ -2,7 +2,7 @@
 import os
 import git
 import traceback
-from datetime import datetime
+from typing import Any, Dict, List, Optional
 from app.db.crud import CRUDRepository
 from app.db.models import DBMigrationCheckpoint
 
@@ -143,7 +143,9 @@ async def rollback_git_checkpoint(run_id: str, db) -> dict:
         if db_run and db_run.changed_files:
             for f in db_run.changed_files:
                 # Store paths relative to repo root
-                allowed_files.add(f.get("file_path"))
+                path = f.get("file", f.get("file_path"))
+                if path:
+                    allowed_files.add(path)
 
         # If any modified file is NOT in the allowed list, block rollback to protect user modifications
         unexpected_files = modified_files - allowed_files

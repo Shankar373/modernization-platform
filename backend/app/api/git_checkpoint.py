@@ -9,6 +9,7 @@ The checkpoint records all staged/unstaged changes with a descriptive message.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -199,7 +200,6 @@ async def download_checkpoint_workspace(workspace_path: str, project_id: str):
     Skips build artifacts, lockfiles, venv, and large metadata directories.
     """
     import io
-    import re
     import zipfile
     from fastapi.responses import StreamingResponse
 

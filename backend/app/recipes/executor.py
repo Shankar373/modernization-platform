@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import difflib
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -276,13 +275,14 @@ def _ts_strict_mode(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         before = compiler.get("strict")
         if before is True:
             continue
+        before_content = json.dumps(data, indent=2)
         compiler["strict"] = True
         new_content = json.dumps(data, indent=2) + "\n"
         res.notes.append(f"{rel}: enabled strict=true (was {before if before is not None else 'unset'}).")
         if not dry_run:
             tsconfig.write_text(new_content, encoding="utf-8")
         res.changed_files.append(_build_change(
-            rel, json.dumps(data, indent=2), new_content, "ts-strict",
+            rel, before_content, new_content, "ts-strict",
             "TS_STRICT_MODE", "Enabled compilerOptions.strict in tsconfig."))
     if not res.changed_files and not res.errors:
         res.status = "NOT_APPLICABLE"
@@ -515,6 +515,9 @@ _FORMAT_CALLS = re.compile(
 # Split top-level format args on commas (ignoring nested quotes/brackets)
 _ARG_SPLIT_RE = re.compile(r",\s*(?=(?:[^'\"]|'[^']*'|\"[^\"]*\")*$)")
 
+# Bare '{}' slot in a format template
+_BARE_SLOT_RE = re.compile(r"\{\s*}")
+
 
 def _py_f_strings(content: str) -> str:
     """Convert '{0} {1}'.format(a, b) / '{}'.format(x) into f-strings.
@@ -554,16 +557,34 @@ def _py_f_strings(content: str) -> str:
         if len(placeholders) != len(args):
             return m.group(0)
 
+        # Validate numbered indices and figure out which args bare slots consume.
+        numbered = []
+        for ph in placeholders:
+            if ph != "":
+                try:
+                    idx = int(ph)
+                except ValueError:
+                    return m.group(0)
+                if idx >= len(args):
+                    return m.group(0)
+                numbered.append(idx)
+        used_by_number = set(numbered)
+        if len(numbered) != len(used_by_number):
+            return m.group(0)  # duplicate numbered placeholder — not a simple format
+        unused_args = [i for i in range(len(args)) if i not in used_by_number]
+        bare_count = len(placeholders) - len(numbered)
+        if len(unused_args) < bare_count:
+            return m.group(0)
+
         new_body = template
         for i, arg in enumerate(args):
             new_body = new_body.replace(f"{{{i}}}", f"{{{arg}}}")
-            # '{}' bare slot → first unused positional arg
-        if "{}" in new_body:
-            bare_idx = [j for j, ph in enumerate(placeholders) if ph == ""]
-            if bare_idx:
-                # Replace each bare '{}' with its corresponding arg (first bare matches first arg used)
-                new_body = new_body.replace("{}", f"{{{args[0]}}}", len(placeholders)) \
-                    if bare_idx == list(range(len(placeholders))) else new_body
+        # Replace bare '{}' slots in order of appearance with the next unused arg
+        if bare_count:
+            unused_iter = iter(unused_args)
+            new_body = _BARE_SLOT_RE.sub(
+                lambda _: f"{{{args[next(unused_iter)]}}}", new_body
+            )
         if f"{{{args[0]}}}" not in new_body:
             return m.group(0)  # nothing safe to convert
         return "f" + quote + new_body + quote

@@ -1,4 +1,4 @@
-from app.db.models import (
+from app.db.models import (  # noqa: F401  (models re-exported for Base.metadata / alembic)
     DBProject,
     DBProjectProfile,
     DBMigrationPlan,

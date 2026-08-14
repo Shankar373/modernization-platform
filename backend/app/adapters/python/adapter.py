@@ -11,15 +11,12 @@ represents them accurately — no cross-language conflation.
 from __future__ import annotations
 
 import difflib
-import json
-import os
 import subprocess
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
-import toml
 
 from app.adapters.base import (
     AnalysisResult,

@@ -13,9 +13,8 @@ Falls back gracefully when 'packaging' is unavailable.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
-from app.dependency_analysis.models import Dependency, DependencyStatus, DependencyEcosystem
+from app.dependency_analysis.models import Dependency, DependencyStatus
 
 
 def _parse_version_safe(v: str):

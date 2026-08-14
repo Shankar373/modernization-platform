@@ -41,8 +41,19 @@ from app.core.domain.models import (
 )
 from app.discovery.scanner import UniversalScanner
 
-if not hasattr(CapabilityStatus, "PARTIALLY_AVAILABLE"):
-    setattr(CapabilityStatus, "PARTIALLY_AVAILABLE", CapabilityStatus.PARTIAL)
+
+def _coerce_profile(value):
+    """Accept a MigrationProfile enum or its string value; fall back to STANDARD."""
+    if isinstance(value, MigrationProfile):
+        return value
+    if isinstance(value, str):
+        try:
+            return MigrationProfile(value.strip().upper())
+        except ValueError:
+            pass
+    return MigrationProfile.STANDARD
+
+
 # ── Adapter Registry & Dynamic Discovery ─────────────────────────────────────
 # All language connectors register here for automatic execution during migrations.
 
@@ -299,6 +310,8 @@ class MigrationOrchestrator:
         """
         import concurrent.futures
 
+        migration_profile = _coerce_profile(migration_profile)
+
         adapters = self.get_applicable_adapters(workspace_path)
         if not adapters:
             return {
@@ -367,6 +380,8 @@ class MigrationOrchestrator:
         """
         import concurrent.futures
         import threading
+
+        migration_profile = _coerce_profile(migration_profile)
 
         combined_id = str(uuid.uuid4())
         timeline: list[dict] = [
@@ -511,7 +526,7 @@ class MigrationOrchestrator:
 
 
     def _find_adapter_for_plan(self, plan: Optional[MigrationPlan]) -> Optional[MigrationAdapter]:
-        """Route to adapter by targets[0].language; fall back to steps[0].adapter."""
+        """Route to adapter by targets[0].language; fall back to steps[0].adapter (language or engine name)."""
         if not plan:
             return None
         # Primary: use targets list
@@ -519,9 +534,12 @@ class MigrationOrchestrator:
             adapter = self._find_adapter(plan.targets[0].language)
             if adapter:
                 return adapter
-        # Fallback: infer language from the first step's adapter field
+        # Fallback: infer language from the first step's adapter field (language or engine name)
         if plan.steps:
             adapter = self._find_adapter(plan.steps[0].adapter)
+            if adapter:
+                return adapter
+            adapter = adapter_registry.get_by_engine(plan.steps[0].adapter)
             if adapter:
                 return adapter
         return None

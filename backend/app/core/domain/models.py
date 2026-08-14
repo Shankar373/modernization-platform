@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 class CapabilityStatus(str, Enum):
     AVAILABLE = "AVAILABLE"
     PARTIAL = "PARTIAL"
+    PARTIALLY_AVAILABLE = "PARTIALLY_AVAILABLE"
     ASSESSMENT_ONLY = "ASSESSMENT_ONLY"
     NOT_AVAILABLE = "NOT_AVAILABLE"
 

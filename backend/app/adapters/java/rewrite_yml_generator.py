@@ -10,7 +10,6 @@ from typing import Optional
 
 import yaml
 
-from app.adapters.java.recipe_catalog import RecipeCatalog
 from app.core.domain.models import MigrationPlan
 
 
@@ -30,8 +29,6 @@ class RewriteYmlGenerator:
         Generate rewrite.yml and write it to the workspace.
         Returns the path to the generated file.
         """
-        catalog = RecipeCatalog()
-
         # Re-derive the recipe list from the plan's selected capabilities
         recipe_ids = self._get_recipe_ids_from_plan(plan)
 

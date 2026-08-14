@@ -20,7 +20,7 @@ AsyncSessionLocal = sessionmaker(
 Base = declarative_base()
 
 # Import models to register them on Base metadata
-from app.db import models
+from app.db import models  # noqa: F401
 
 
 async def init_db():

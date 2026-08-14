@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 import git

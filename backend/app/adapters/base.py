@@ -14,6 +14,19 @@ def is_ignored_path(path: Path) -> bool:
             return True
     return False
 
+
+_LANGUAGE_ALIASES = {
+    "c#": "csharp", "csharp": "csharp", "cs": "csharp", "dotnet": "csharp", "vb.net": "csharp",
+    "js": "javascript", "node": "javascript", "nodejs": "javascript", "javascript": "javascript",
+    "ts": "typescript", "typescript": "typescript",
+    "py": "python", "python": "python",
+}
+
+
+def _normalize_language(language: str) -> str:
+    """Map common scanner/display names onto adapter language keys."""
+    return _LANGUAGE_ALIASES.get(language.strip().lower(), language.strip().lower())
+
 from app.core.domain.models import (
     CapabilityStatus,
     MigrationCapability,
@@ -228,7 +241,7 @@ class AdapterRegistry:
         """Find the registered adapter for a given language."""
         if not language:
             return None
-        lang_lower = language.lower()
+        lang_lower = _normalize_language(language)
         for adapter in self._adapters:
             if adapter.language.lower() == lang_lower:
                 return adapter
