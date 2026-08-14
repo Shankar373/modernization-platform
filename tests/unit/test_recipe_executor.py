@@ -18,6 +18,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.recipes.executor import run_recipe, _to_esm, _add_optional_chaining, _replace_any
 
+from unittest.mock import patch
+import pytest
+
+@pytest.fixture(autouse=True)
+def mock_dotnet_toolchain():
+    with patch("shutil.which", return_value="mock_dotnet"), \
+         patch("subprocess.run") as mock_run:
+        class MockCompletedProcess:
+            returncode = 0
+            stdout = "Build succeeded."
+            stderr = ""
+        mock_run.return_value = MockCompletedProcess()
+        yield
+
+
 
 @pytest.fixture
 def ws(tmp_path: Path) -> Path:

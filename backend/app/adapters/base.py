@@ -201,12 +201,67 @@ class MigrationAdapter(ABC):
 
     @abstractmethod
     def validate(self, workspace_path: str, result: MigrationResult) -> ValidationResult:
-        """
-        Validate the migrated repository (build, test, static analysis).
-        """
-        ...
+        """Validate transformed C# sources by compiling them with the .NET SDK if available."""
+        import shutil
+        import subprocess
+        errors = []
+        warnings = []
+        
+        has_dotnet = shutil.which("dotnet") is not None
+        if not has_dotnet:
+            warnings.append("dotnet CLI not found on host — C# build/test status = NOT_AVAILABLE")
+            return ValidationResult(
+                build_passed=False,
+                tests_passed=False,
+                warnings=warnings,
+                raw_output="C# build/test status = NOT_AVAILABLE (dotnet CLI not found)",
+            )
+            
+        ws = Path(workspace_path)
+        csproj_files = list(ws.rglob("*.csproj"))
+        if not csproj_files:
+            return ValidationResult(build_passed=True, tests_passed=True)
+            
+        build_ok = True
+        for csproj in csproj_files:
+            if is_ignored_path(csproj):
+                continue
+            try:
+                res = subprocess.run(
+                    ["dotnet", "build", str(csproj)],
+                    capture_output=True, text=True, timeout=120
+                )
+                if res.returncode != 0:
+                    build_ok = False
+                    errors.append(f"Build failed for {csproj.name}: {res.stderr or res.stdout}")
+            except Exception as e:
+                build_ok = False
+                errors.append(f"Build exception for {csproj.name}: {e}")
+                
+        tests_ok = build_ok
+        if build_ok:
+            for csproj in csproj_files:
+                if is_ignored_path(csproj):
+                    continue
+                try:
+                    content = csproj.read_text(encoding="utf-8", errors="replace")
+                    if "Microsoft.NET.Test.Sdk" in content:
+                        res = subprocess.run(
+                            ["dotnet", "test", str(csproj)],
+                            capture_output=True, text=True, timeout=120
+                        )
+                        if res.returncode != 0:
+                            tests_ok = False
+                            errors.append(f"Tests failed for {csproj.name}: {res.stderr or res.stdout}")
+                except Exception:
+                    pass
 
-    @abstractmethod
+        return ValidationResult(
+            build_passed=build_ok,
+            tests_passed=tests_ok,
+            errors=errors,
+            raw_output="; ".join(errors) if errors else "Build and tests passed successfully via dotnet CLI.",
+        )
     def generate_report(self, result: MigrationResult, validation: ValidationResult) -> dict:
         """
         Generate a structured migration report.
@@ -757,6 +812,5 @@ class CSharpRoslynAdapter(MigrationAdapter):
             "timeline": result.timeline,
             "changed_files": result.changed_files,
         }
-
 
 

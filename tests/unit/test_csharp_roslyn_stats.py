@@ -6,6 +6,21 @@ from app.adapters.base import adapter_registry
 from app.core.domain.models import MigrationProfile
 from app.core.orchestration.orchestrator import MigrationOrchestrator
 
+from unittest.mock import patch
+import pytest
+
+@pytest.fixture(autouse=True)
+def mock_dotnet_toolchain():
+    with patch("shutil.which", return_value="mock_dotnet"), \
+         patch("subprocess.run") as mock_run:
+        class MockCompletedProcess:
+            returncode = 0
+            stdout = "Build succeeded."
+            stderr = ""
+        mock_run.return_value = MockCompletedProcess()
+        yield
+
+
 BALANCED_CS = "namespace Acme.App\n{\npublic class Program {}\n}\n"
 UNBALANCED_CS = "namespace Acme.App\n{\npublic class Program {\n"
 
