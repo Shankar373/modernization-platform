@@ -23,11 +23,12 @@ STAGES = [
     ("PLAN", 4),
     ("RECIPE_VALIDATION", 5),
     ("TRANSFORMATION", 6),
-    ("COMPILE", 7),
-    ("TEST", 8),
-    ("QUALITY", 9),
-    ("SECURITY", 10),
-    ("FINALIZE", 11)
+    ("CODE CLEANUP & OPTIMIZATION", 7),
+    ("COMPILE", 8),
+    ("TEST", 9),
+    ("QUALITY", 10),
+    ("SECURITY", 11),
+    ("FINALIZE", 12)
 ]
 
 
@@ -386,22 +387,89 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
 
                     await run_stage_event("TRANSFORMATION", 6, "SUCCESS", "Code transformations applied.", logs=str(result.logs))
 
+                    # CODE CLEANUP & OPTIMIZATION
+                    await run_stage_event("CODE CLEANUP & OPTIMIZATION", 7, "RUNNING", "Running code cleanup & optimization...")
+                    optimization_result = None
+                    optimization_changed_files = []
+                    try:
+                        from app.optimization.optimizer import CodeOptimizer
+                        if result.changed_files:
+                            optimizer = CodeOptimizer()
+                            opt_result = await asyncio.to_thread(
+                                optimizer.optimize,
+                                workspace_path,
+                                result.changed_files,  # pass metadata objects for full baseline context
+                                False,  # not a dry run
+                            )
+                            optimization_result = opt_result.to_dict()
+                            # Collect optimization changes for FINALIZE
+                            from app.core.domain.models import FileChangeMetadata
+                            for opt_file in opt_result.optimized_files:
+                                # Even if not changed on disk, we pass the traceability metadata
+                                opt_chg = FileChangeMetadata(
+                                    file=opt_file.file,
+                                    status="MODIFIED",
+                                    tools=[opt_file.recipe],
+                                    before_content=opt_file.before_content,
+                                    after_content=opt_file.after_content,
+                                    diff=opt_file.diff,
+                                    changes=[{"type": "OPTIMIZATION", "description": opt_file.optimization}],
+                                    original_content=opt_file.original_content,
+                                    modernized_content=opt_file.modernized_content,
+                                    optimized_content=opt_file.optimized_content,
+                                    modernization_diff=opt_file.modernization_diff,
+                                    optimization_diff=opt_file.optimization_diff,
+                                    final_diff=opt_file.final_diff,
+                                )
+                                optimization_changed_files.append(opt_chg)
+                                
+                            # Update stats
+                            result.statistics.files_optimized = opt_result.files_changed
+                            result.statistics.files_optimization_skipped = opt_result.files_skipped
+
+                            if opt_result.rolled_back or not opt_result.success:
+                                await run_stage_event(
+                                    "CODE CLEANUP & OPTIMIZATION", 7, "FAILED",
+                                    f"Optimization validation failed and was rolled back. Modernization changes preserved. {opt_result.error or ''}",
+                                    structured=optimization_result,
+                                )
+                            else:
+                                await run_stage_event(
+                                    "CODE CLEANUP & OPTIMIZATION", 7, "SUCCESS",
+                                    f"Optimization complete: {opt_result.files_changed} file(s) formatted, "
+                                    f"{opt_result.files_skipped} skipped.",
+                                    structured=optimization_result,
+                                )
+                        else:
+                            await run_stage_event(
+                                "CODE CLEANUP & OPTIMIZATION", 7, "SUCCESS",
+                                "No changed files to optimize -- stage skipped.",
+                                structured={"files_changed": 0, "skipped": True},
+                            )
+                    except Exception as opt_err:
+                        print(f"[Celery] OPTIMIZATION stage failed: {opt_err}")
+                        await run_stage_event(
+                            "CODE CLEANUP & OPTIMIZATION", 7, "FAILED",
+                            f"Optimization failed due to error: {opt_err}",
+                            structured={"error": str(opt_err)},
+                        )
+
                     # COMPILE
-                    await run_stage_event("COMPILE", 7, "RUNNING", "Running build compilation validation...")
+                    await run_stage_event("COMPILE", 8, "RUNNING", "Running build compilation validation...")
                     build_passed = result.statistics.build_passed if result.statistics.build_passed is not None else True
                     if not build_passed:
-                        await run_stage_event("COMPILE", 7, "FAILED", "Build compilation failed.", logs=result.logs.get("validation"))
-                    await run_stage_event("COMPILE", 7, "SUCCESS", "Build compilation passed.", logs=result.logs.get("validation"))
+                        await run_stage_event("COMPILE", 8, "FAILED", "Build compilation failed.", logs=result.logs.get("validation"))
+                    await run_stage_event("COMPILE", 8, "SUCCESS", "Build compilation passed.", logs=result.logs.get("validation"))
 
                     # TEST
-                    await run_stage_event("TEST", 8, "RUNNING", "Running unit tests...")
+                    await run_stage_event("TEST", 9, "RUNNING", "Running unit tests...")
                     tests_passed = result.statistics.tests_failed == 0 if result.statistics.tests_total > 0 else True
                     if not tests_passed:
-                        await run_stage_event("TEST", 8, "FAILED", "Unit tests failed.", logs=result.logs.get("validation"))
-                    await run_stage_event("TEST", 8, "SUCCESS", f"Unit tests passed ({result.statistics.tests_passed}/{result.statistics.tests_total}).", logs=result.logs.get("validation"))
+                        await run_stage_event("TEST", 9, "FAILED", "Unit tests failed.", logs=result.logs.get("validation"))
+                    await run_stage_event("TEST", 9, "SUCCESS", f"Unit tests passed ({result.statistics.tests_passed}/{result.statistics.tests_total}).", logs=result.logs.get("validation"))
 
                     # ── QUALITY: run registered quality recipes for real ──────────
-                    await run_stage_event("QUALITY", 9, "RUNNING", "Running code quality recipes...")
+                    await run_stage_event("QUALITY", 10, "RUNNING", "Running code quality recipes...")
                     quality_changed: list = []
                     quality_findings_count = 0
                     quality_recipes_run = 0
@@ -436,7 +504,7 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                         print(f"[Celery] QUALITY stage failed: {quality_err}")
 
                     await run_stage_event(
-                        "QUALITY", 9, "SUCCESS",
+                        "QUALITY", 10, "SUCCESS",
                         f"Ran {quality_recipes_run} quality recipe(s); {len(quality_changed)} file(s) changed.",
                         structured={
                             "recipes_run": quality_recipes_run,
@@ -446,7 +514,7 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                     )
 
                     # ── SECURITY: run real security scans ─────────────────────────
-                    await run_stage_event("SECURITY", 10, "RUNNING", "Running security scans...")
+                    await run_stage_event("SECURITY", 11, "RUNNING", "Running security scans...")
                     security_findings: list = []
                     security_recipes_run = 0
                     try:
@@ -477,16 +545,96 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                         print(f"[Celery] SECURITY stage failed: {sec_err}")
 
                     await run_stage_event(
-                        "SECURITY", 10, "SUCCESS",
+                        "SECURITY", 11, "SUCCESS",
                         f"Ran {security_recipes_run} security scan(s); {len(security_findings)} finding(s).",
                         structured={"scans_run": security_recipes_run, "findings_count": len(security_findings), "findings": security_findings},
                     )
 
                     # FINALIZE
-                    await run_stage_event("FINALIZE", 11, "RUNNING", "Persisting results and report...")
+                    await run_stage_event("FINALIZE", 12, "RUNNING", "Persisting results and report...")
 
                     # Save results to DB (including files changed by QUALITY stage)
-                    all_changed_files = [f.model_dump() for f in result.changed_files] + quality_changed
+                    # Merge result.changed_files (modernized) and optimization_changed_files (optimized) with 100% traceability
+                    def _make_local_diff(before: str, after: str, file_path: str) -> str:
+                        import difflib
+                        diff_lines = list(difflib.unified_diff(
+                            before.splitlines(keepends=True),
+                            after.splitlines(keepends=True),
+                            fromfile=f"a/{file_path}",
+                            tofile=f"b/{file_path}",
+                            lineterm="",
+                        ))
+                        return "".join(diff_lines)
+
+                    merged_files_map = {}
+                    
+                    # 1. Add modernized files
+                    for f in result.changed_files:
+                        fd = f.model_dump()
+                        fd.setdefault("original_content", fd.get("before_content") or "")
+                        fd.setdefault("modernized_content", fd.get("after_content") or "")
+                        fd.setdefault("optimized_content", fd.get("after_content") or "")
+                        fd.setdefault("modernization_diff", fd.get("diff") or "")
+                        fd.setdefault("optimization_diff", "")
+                        fd.setdefault("final_diff", fd.get("diff") or "")
+                        merged_files_map[f.file] = fd
+                        
+                    # 2. Merge optimized files
+                    for f in optimization_changed_files:
+                        fd = f.model_dump()
+                        if f.file in merged_files_map:
+                            existing = merged_files_map[f.file]
+                            # Merge tools
+                            existing_tools = existing.get("tools") or []
+                            new_tools = fd.get("tools") or []
+                            for t in new_tools:
+                                if t not in existing_tools:
+                                    existing_tools.append(t)
+                            existing["tools"] = existing_tools
+                            
+                            # Merge changes
+                            existing_changes = existing.get("changes") or []
+                            new_changes = fd.get("changes") or []
+                            existing_changes.extend(new_changes)
+                            existing["changes"] = existing_changes
+                            
+                            # Update traceability fields
+                            existing["optimized_content"] = fd.get("optimized_content")
+                            existing["optimization_diff"] = fd.get("optimization_diff")
+                            existing["final_diff"] = fd.get("final_diff")
+                            existing["after_content"] = fd.get("after_content")
+                            existing["diff"] = fd.get("final_diff")
+                        else:
+                            fd.setdefault("original_content", fd.get("before_content") or "")
+                            fd.setdefault("modernized_content", fd.get("before_content") or "")
+                            fd.setdefault("optimized_content", fd.get("after_content") or "")
+                            fd.setdefault("modernization_diff", "")
+                            fd.setdefault("optimization_diff", fd.get("diff") or "")
+                            fd.setdefault("final_diff", fd.get("diff") or "")
+                            merged_files_map[f.file] = fd
+
+                    # 3. Add quality changed files
+                    quality_changed_dump = []
+                    for q in quality_changed:
+                        q_file = q.get("file")
+                        if q_file in merged_files_map:
+                            existing = merged_files_map[q_file]
+                            existing["tools"] = (existing.get("tools") or []) + (q.get("tools") or [])
+                            existing["changes"] = (existing.get("changes") or []) + (q.get("changes") or [])
+                            existing["optimized_content"] = q.get("after_content")
+                            existing["after_content"] = q.get("after_content")
+                            existing["final_diff"] = _make_local_diff(existing["original_content"], existing["optimized_content"], q_file)
+                            existing["diff"] = existing["final_diff"]
+                        else:
+                            q.setdefault("original_content", q.get("before_content") or "")
+                            q.setdefault("modernized_content", q.get("before_content") or "")
+                            q.setdefault("optimized_content", q.get("after_content") or "")
+                            q.setdefault("modernization_diff", "")
+                            q.setdefault("optimization_diff", "")
+                            q.setdefault("final_diff", q.get("diff") or "")
+                            merged_files_map[q_file] = q
+                            
+                    all_changed_files = list(merged_files_map.values())
                     await CRUDRepository.update_migration_run_status(
                         db=db,
                         result_id=result_id,
@@ -519,7 +667,7 @@ def run_migration_task(result_id: str, workspace_path: str, plan_id: str = None,
                         output=result.logs.get("validation", ""),
                     )
 
-                    await run_stage_event("FINALIZE", 11, "SUCCESS", "Migration run completed successfully.")
+                    await run_stage_event("FINALIZE", 12, "SUCCESS", "Migration run completed successfully.")
 
             except Exception as e:
                 # Capture run failure if not already captured

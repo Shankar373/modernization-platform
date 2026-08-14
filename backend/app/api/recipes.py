@@ -885,3 +885,77 @@ async def execute_recipes(req: ExecuteRequest):
             f"{total_findings} security finding(s)."
         ),
     }
+
+
+# ── Code Optimization Endpoint ──────────────────────────────────────────────────
+
+class OptimizeRequest(BaseModel):
+    workspace_path: str
+    project_id: str
+    changed_files: List[str] = Field(default_factory=list)
+    recipe_ids: List[str] = Field(default_factory=list)
+    dry_run: bool = False
+
+
+@router.post("/recipes/optimize")
+async def optimize_code(req: OptimizeRequest):
+    """
+    Run code optimization on the files that were actually changed by modernization.
+
+    Applies real language-specific formatters:
+      - Python: Ruff format + lint fix
+      - C#: dotnet format
+      - JS/TS: Prettier
+
+    Generates before/after content and unified diffs from real file contents.
+    Auto-rollbacks optimization-only changes if the resulting build fails.
+    Modernization changes are ALWAYS preserved even if optimization fails.
+
+    In dry_run=true mode, diffs are computed but NO files are written to disk.
+    """
+    from app.optimization.optimizer import CodeOptimizer
+
+    if not req.changed_files:
+        return {
+            "success": True,
+            "dry_run": req.dry_run,
+            "files_scanned": 0,
+            "files_optimized": 0,
+            "files_changed": 0,
+            "files_unchanged": 0,
+            "files_skipped": 0,
+            "files_failed": 0,
+            "skipped_files": [],
+            "optimized_files": [],
+            "build_passed": True,
+            "tests_passed": None,
+            "build_output": "",
+            "rolled_back": False,
+            "error": None,
+            "summary": "No changed files provided -- optimization skipped.",
+        }
+
+    try:
+        optimizer = CodeOptimizer()
+        result = optimizer.optimize(
+            workspace_path=req.workspace_path,
+            changed_files=req.changed_files,
+            dry_run=req.dry_run,
+        )
+        data = result.to_dict()
+        data["summary"] = (
+            f"{'[DRY RUN] ' if req.dry_run else ''}"
+            f"{result.files_changed} file(s) optimized, "
+            f"{result.files_unchanged} unchanged, "
+            f"{result.files_skipped} skipped, "
+            f"{result.files_failed} failed. "
+            f"Build: {'passed' if result.build_passed else 'FAILED'}."
+            f"{' Rolled back.' if result.rolled_back else ''}"
+        )
+        return data
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail=f"Optimization failed: {e}\n{traceback.format_exc()[:800]}"
+        )

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+// @ts-ignore
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   analyzeRepo,
@@ -10,6 +11,7 @@ import {
   analyzeRecipeConflicts,
   generateMigrationPlan,
   executeRecipes,
+  optimizeCode,
   createGitCheckpoint,
   downloadCheckpointZip,
 } from '../api/client';
@@ -20,6 +22,7 @@ import type {
   RecipeAnalysisResult,
   MigrationPlan,
   GitCheckpointResult,
+  OptimizationResult,
 } from '../types';
 
 type StageKey =
@@ -36,6 +39,8 @@ type StageKey =
   | 'plan'
   | 'checkpointing'
   | 'executing-recipes'
+  | 'optimizing'
+  | 'changed-files'
   | 'done';
 
 interface Step {
@@ -59,8 +64,10 @@ const STEPS: Step[] = [
   { key: 'conflict-resolution',number: 10, title: 'Conflict Resolution',       icon: '⚡', auto: false },
   { key: 'plan',               number: 11, title: 'Migration Plan',            icon: '🗺️', auto: false },
   { key: 'checkpointing',      number: 12, title: 'Git Checkpoint',            icon: '🎯', auto: true  },
-  { key: 'executing-recipes',  number: 12, title: 'Execute Recipes',           icon: '🛠️', auto: true  },
-  { key: 'done',               number: 12, title: 'Execute Recipes',           icon: '✅', auto: true  },
+  { key: 'executing-recipes',  number: 13, title: 'Execute Recipes',           icon: '🛠️', auto: true  },
+  { key: 'optimizing',          number: 14, title: 'Code Cleanup & Optimization',         icon: '⚙️', auto: true  },
+  { key: 'changed-files',       number: 15, title: 'Changed Files',             icon: '📄', auto: false },
+  { key: 'done',               number: 15, title: 'Changed Files',             icon: '✅', auto: true  },
 ];
 
 const DISPLAY_STEPS = STEPS.filter(s => s.key !== 'done');
@@ -103,6 +110,287 @@ function InfoCard({ icon, label, value }: { icon: string; label: string; value: 
       <div style={{ fontSize: 28, marginBottom: 8 }}>{icon}</div>
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>{value}</div>
       <div className="text-muted text-sm">{label}</div>
+    </div>
+  );
+}
+
+
+// ── OptimizingStep ─────────────────────────────────────────────────────────────
+
+function DiffBlock({ diff, fileName }: { diff: string; fileName: string }) {
+  const lines = diff ? diff.split('\n') : [];
+  return (
+    <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320 }}>
+      <div style={{ padding: '6px 12px', background: 'rgba(0,0,0,0.2)', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>
+        {fileName}
+      </div>
+      <div style={{ padding: '4px 0' }}>
+        {lines.map((line, i) => {
+          const isAdd = line.startsWith('+') && !line.startsWith('+++');
+          const isDel = line.startsWith('-') && !line.startsWith('---');
+          const isHdr = line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++');
+          return (
+            <div key={i} style={{
+              padding: '1px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              background: isAdd ? 'rgba(16,185,129,0.12)' : isDel ? 'rgba(239,68,68,0.12)' : isHdr ? 'rgba(99,102,241,0.08)' : 'transparent',
+              color: isAdd ? '#34d399' : isDel ? '#f87171' : isHdr ? '#818cf8' : 'var(--color-text)',
+            }}>
+              {line || ' '}
+            </div>
+          );
+        })}
+        {lines.length === 0 && <div style={{ padding: '8px 12px', color: 'var(--color-text-muted)' }}>No changes</div>}
+      </div>
+    </div>
+  );
+}
+
+function ChangedFileCard({ f, idx, dryRun }: { f: import('../types').OptimizedFileChange; idx: number; dryRun: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'final-diff' | 'mod-diff' | 'opt-diff' | 'orig' | 'mod' | 'opt'>('final-diff');
+  const statusColor = f.validation_status === 'PASSED' ? '#10b981' : f.validation_status === 'FAILED' ? '#ef4444' : '#6b7280';
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'mod-diff':
+        return <DiffBlock diff={f.modernization_diff || ''} fileName={`${f.file} (Modernization Diff)`} />;
+      case 'opt-diff':
+        return <DiffBlock diff={f.optimization_diff || ''} fileName={`${f.file} (Cleanup Diff)`} />;
+      case 'final-diff':
+        return <DiffBlock diff={f.final_diff || f.diff || ''} fileName={`${f.file} (Final Unified Diff)`} />;
+      case 'orig':
+        return (
+          <pre style={{ margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {f.original_content || '/* Empty file */'}
+          </pre>
+        );
+      case 'mod':
+        return (
+          <pre style={{ margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {f.modernized_content || f.before_content || '/* Empty file */'}
+          </pre>
+        );
+      case 'opt':
+        return (
+          <pre style={{ margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {f.optimized_content || f.after_content || '/* Empty file */'}
+          </pre>
+        );
+    }
+  };
+
+  const tabStyle = (tab: typeof activeTab) => ({
+    padding: '6px 12px',
+    border: 'none',
+    background: activeTab === tab ? 'var(--color-accent)' : 'transparent',
+    color: activeTab === tab ? '#fff' : 'var(--color-text-muted)',
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: 11,
+    fontWeight: 600 as const,
+    marginRight: 6,
+    transition: 'all 0.2s',
+  });
+
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', background: 'var(--color-surface-2)' }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span style={{ color: 'var(--color-text-muted)', fontSize: 11, fontWeight: 700, width: 24, flexShrink: 0 }}>#{idx + 1}</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file}</span>
+        <Badge text={f.recipe} color="#6366f1" />
+        <Badge text={f.validation_status} color={statusColor} />
+        {f.changed && <Badge text="CHANGED" color="#10b981" />}
+        {!f.changed && <Badge text="UNCHANGED" color="#6b7280" />}
+        <span style={{ color: 'var(--color-text-muted)', fontSize: 16 }}>{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div style={{ padding: '16px' }}>
+          {dryRun && (
+            <div style={{ padding: '10px 14px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 6, color: '#93c5fd', fontSize: 12, fontWeight: 600, marginBottom: 12 }}>
+              ℹ️ Preview only — no files were modified.
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+            <strong>Cleanup/Optimization description:</strong> {f.optimization}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: 12, background: 'rgba(0,0,0,0.1)', padding: 4, borderRadius: 6, width: 'max-content' }}>
+            <button style={tabStyle('final-diff')} onClick={() => setActiveTab('final-diff')}>Final Diff</button>
+            <button style={tabStyle('mod-diff')} onClick={() => setActiveTab('mod-diff')}>Modernization Diff</button>
+            <button style={tabStyle('opt-diff')} onClick={() => setActiveTab('opt-diff')}>Cleanup Diff</button>
+            <button style={tabStyle('orig')} onClick={() => setActiveTab('orig')}>Original</button>
+            <button style={tabStyle('mod')} onClick={() => setActiveTab('mod')}>Modernized</button>
+            <button style={tabStyle('opt')} onClick={() => setActiveTab('opt')}>Cleaned</button>
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            {renderTabContent()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OptimizingStep({ result, error }: { result: OptimizationResult | null; error: string | null; dryRun?: boolean }) {
+  if (error) {
+    return (
+      <div style={{ padding: '20px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, color: '#fca5a5', marginBottom: 20 }}>
+        <strong>Optimization error:</strong> {error}
+      </div>
+    );
+  }
+  if (!result) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <Spinner size={40} />
+        <p style={{ marginTop: 16, color: 'var(--color-text-muted)' }}>Running code optimization & formatting…</p>
+        <p style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted)' }}>Ruff · dotnet format · Prettier</p>
+      </div>
+    );
+  }
+  return (
+    <div className="animate-fade-up" style={{ textAlign: 'center', padding: 40 }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>{result.success ? '✅' : '⚠️'}</div>
+      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+        {result.success ? 'Optimization Complete' : 'Optimization Rolled Back'}
+      </h2>
+      <p style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>{result.summary}</p>
+      {result.rolled_back && (
+        <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, color: '#fcd34d', fontSize: 13 }}>
+          ⚠️ Optimization rolled back. Modernization changes are preserved.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChangedFilesStep({
+  result, dryRun, onFinish
+}: {
+  result: OptimizationResult | null;
+  dryRun?: boolean;
+  onFinish: () => void;
+}) {
+  if (!result) {
+    return <div style={{ textAlign: 'center', padding: 60 }}><Spinner size={40} /></div>;
+  }
+
+  const summaryCards = [
+    { icon: '🔍', label: 'Files Scanned', value: result.files_scanned },
+    { icon: '✨', label: 'Files Optimized', value: result.files_optimized },
+    { icon: '📝', label: 'Files Changed', value: result.files_changed },
+    { icon: '⏭️', label: 'Files Skipped', value: result.files_skipped },
+    { icon: '❌', label: 'Files Failed', value: result.files_failed },
+    { icon: result.build_passed ? '🟢' : '🔴', label: 'Build', value: result.build_passed ? 'Passed' : 'Failed' },
+  ];
+
+  return (
+    <div className="animate-fade-up">
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Changed Files & Before/After Diff</h2>
+        <p style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>
+          Showing {result.optimized_files.length} optimized file(s) with real before/after content and unified diffs.
+        </p>
+      </div>
+
+      {dryRun && (
+        <div style={{ padding: '12px 16px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 8, color: '#93c5fd', fontSize: 13, fontWeight: 600, marginBottom: 20 }}>
+          ℹ️ Preview only — no files were modified.
+        </div>
+      )}
+
+      {result.rolled_back && (
+        <div style={{ padding: '12px 16px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, color: '#fcd34d', fontSize: 13, marginBottom: 20 }}>
+          ⚠️ <strong>Rolled Back:</strong> {result.error || 'Post-optimization build failed. Optimization rolled back. Modernization changes preserved.'}
+        </div>
+      )}
+
+      {/* Summary Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 28 }}>
+        {summaryCards.map(c => (
+          <div key={c.label} className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
+            <div style={{ fontSize: 24, marginBottom: 6 }}>{c.icon}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 2 }}>{c.value}</div>
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{c.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-file accordion */}
+      {result.optimized_files.length > 0 && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            OPTIMIZED FILES ({result.optimized_files.length})
+          </h3>
+          {result.optimized_files.map((f, i) => (
+            <ChangedFileCard key={f.file} f={f} idx={i} dryRun={!!dryRun} />
+          ))}
+        </div>
+      )}
+
+      {/* Skipped files */}
+      {result.skipped_files.length > 0 && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginBottom: 12, fontSize: 13, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            SKIPPED FILES ({result.skipped_files.length})
+          </h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>File</th>
+                <th style={{ textAlign: 'left', padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.skipped_files.map((sf, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11 }}>{sf.file}</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--color-text-muted)' }}>{sf.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Build output */}
+      {result.build_output && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginBottom: 12, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>BUILD OUTPUT</h3>
+          <pre style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>
+            {result.build_output}
+          </pre>
+        </div>
+      )}
+
+      {/* Final validation summary */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h3 style={{ marginBottom: 12, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>FINAL VALIDATION</h3>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{result.build_passed ? '✅' : '❌'}</span>
+            <span style={{ fontSize: 13 }}>Build: <strong style={{ color: result.build_passed ? '#10b981' : '#ef4444' }}>{result.build_passed ? 'Passed' : 'Failed'}</strong></span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{result.rolled_back ? '↩️' : '✓'}</span>
+            <span style={{ fontSize: 13 }}>Optimization: <strong style={{ color: result.rolled_back ? '#f59e0b' : '#10b981' }}>{result.rolled_back ? 'Rolled Back' : 'Applied'}</strong></span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📝</span>
+            <span style={{ fontSize: 13 }}>Changed: <strong>{result.files_changed}</strong> / Skipped: <strong>{result.files_skipped}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onFinish}>
+          Finish Migration →
+        </button>
+      </div>
     </div>
   );
 }
@@ -433,10 +721,10 @@ function AIRecommendingStep({ recommendations, llmPowered, llmProvider, onContin
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '10px 16px', background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 10 }}>
           <span style={{ fontSize: 20 }}>✨</span>
           <div>
-            <span style={{ fontWeight: 700, fontSize: 13, color: '#a78bfa' }}>AI-Powered by {llmProvider === 'gemini' ? 'Google Gemini' : llmProvider}</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: '#a78bfa' }}>AI-Powered by {llmProvider === 'groq' ? 'Groq' : llmProvider}</span>
             <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', margin: 0 }}>Recommendations generated by LLM — analyzed your codebase, stack, and dependencies.</p>
           </div>
-          <Badge text="✦ Gemini" color="#6366f1" />
+          <Badge text="✦ Groq" color="#f59e0b" />
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
@@ -1069,11 +1357,11 @@ export default function Pipeline() {
       .then(statusRes => {
         if (statusRes.data?.llm_available) {
           return getLlmRecommendations({
-            project_id: projectId,
+            project_id: projectId || '',
             languages: langs,
             frameworks,
             dependencies: deps.slice(0, 30),
-            has_tests: profile.test_frameworks.length > 0,
+            has_tests: profile?.test_frameworks ? profile.test_frameworks.length > 0 : false,
             has_ci: false,
           }).then(llmRes => {
             const recs = llmRes.data?.recommendations || [];
@@ -1095,7 +1383,7 @@ export default function Pipeline() {
                 applicable: true,
               }));
               setLlmPowered(true);
-              setLlmProvider(llmRes.data?.provider || 'gemini');
+              setLlmProvider(llmRes.data?.provider || 'groq');
               setRecommendations(mapped);
               return;
             }
@@ -1110,12 +1398,12 @@ export default function Pipeline() {
     function fallbackRecommend() {
       const depNames = deps.map((d: any) => d.name?.toLowerCase()).filter(Boolean);
       return getRecipeRecommendations({
-        project_id: projectId,
-        workspace_path: workspacePath!,
+        project_id: projectId || '',
+        workspace_path: workspacePath || '',
         languages: langs,
         frameworks,
         detected_deps: depNames,
-        has_tests: profile.test_frameworks.length > 0,
+        has_tests: profile?.test_frameworks ? profile.test_frameworks.length > 0 : false,
         has_ci: false,
       })
         .then(res => setRecommendations(res.data.recipes || []))
@@ -1139,7 +1427,7 @@ export default function Pipeline() {
     );
 
     generateMigrationPlan({
-      project_id: projectId,
+      project_id: projectId || '',
       workspace_path: workspacePath,
       selected_recipe_ids: Array.from(selectedRecipeIds),
       approved_dep_updates: approvedUpdates,
@@ -1153,7 +1441,7 @@ export default function Pipeline() {
 
     createGitCheckpoint({
       workspace_path: workspacePath,
-      project_id: projectId,
+      project_id: projectId || '',
       message: plan?.git_checkpoint_message,
     })
       .then(res => {
@@ -1167,17 +1455,47 @@ export default function Pipeline() {
 
   const [recipeRun, setRecipeRun] = useState<any>(null);
   const [recipeRunError, setRecipeRunError] = useState<string | null>(null);
+  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
+  const [optimizationError, setOptimizationError] = useState<string | null>(null);
+
+
+  useEffect(() => {
+    if (stage !== 'optimizing' || optimizationResult !== null || optimizationError !== null || !workspacePath || !projectId) return;
+    const changedFiles: string[] = [];
+    if (recipeRun?.recipes) {
+      for (const r of recipeRun.recipes) {
+        for (const f of (r.changed_files || [])) {
+          if (f.file && !changedFiles.includes(f.file)) changedFiles.push(f.file);
+        }
+      }
+    }
+    optimizeCode({
+      project_id: projectId || '',
+      workspace_path: workspacePath,
+      changed_files: changedFiles,
+      recipe_ids: Array.from(selectedRecipeIds),
+      dry_run: false,
+    })
+      .then(res => {
+        setOptimizationResult(res.data);
+        setTimeout(() => go('changed-files'), 1000);
+      })
+      .catch(e => {
+        setOptimizationError(e?.response?.data?.detail || e.message || 'Optimization failed.');
+        setTimeout(() => go('changed-files'), 1000);
+      });
+  }, [stage]);
 
   useEffect(() => {
     if (stage !== 'executing-recipes' || recipeRun !== null || recipeRunError !== null || !workspacePath || !projectId) return;
     executeRecipes({
-      project_id: projectId,
+      project_id: projectId || '',
       workspace_path: workspacePath,
       recipe_ids: Array.from(selectedRecipeIds),
     })
       .then(res => {
         setRecipeRun(res.data);
-        setTimeout(() => go('done'), 1500);
+        setTimeout(() => go('optimizing'), 1500);
       })
       .catch(e => setRecipeRunError(e?.response?.data?.detail || e.message || 'Recipe execution failed.'));
   }, [stage]);
@@ -1185,7 +1503,7 @@ export default function Pipeline() {
   const stageOrder: StageKey[] = [
     'discovery', 'profile', 'dep-detection', 'version-detection', 'dep-review',
     'dep-applying', 'ai-recommending', 'recipe-selection', 'recipe-analyzing',
-    'conflict-resolution', 'plan', 'checkpointing', 'executing-recipes', 'done',
+    'conflict-resolution', 'plan', 'checkpointing', 'executing-recipes', 'optimizing', 'changed-files', 'done',
   ];
   const currentIdx = stageOrder.indexOf(stage);
 
@@ -1204,7 +1522,11 @@ export default function Pipeline() {
       10: ['conflict-resolution'],
       11: ['plan'],
       12: ['checkpointing'],
-      13: ['executing-recipes', 'done'],
+      13: ['executing-recipes'],
+
+      14: ['optimizing'],
+
+      15: ['changed-files', 'done'],
     };
     const stages = stepStages[step.number] || [];
     if (stages.includes(stage)) return 'active';
@@ -1287,6 +1609,21 @@ export default function Pipeline() {
           <RecipeExecuteStep
             result={recipeRun}
             error={recipeRunError}
+          />
+        );
+      case 'optimizing':
+        return (
+          <OptimizingStep
+            result={optimizationResult}
+            error={optimizationError}
+          />
+        );
+      case 'changed-files':
+        return (
+          <ChangedFilesStep
+            result={optimizationResult}
+            dryRun={false}
+            onFinish={() => go('done')}
           />
         );
       case 'done':

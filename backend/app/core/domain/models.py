@@ -174,6 +174,12 @@ class FileChangeMetadata(BaseModel):
     before_content: Optional[str] = None
     after_content: Optional[str] = None
     diff: Optional[str] = None
+    original_content: Optional[str] = None
+    modernized_content: Optional[str] = None
+    optimized_content: Optional[str] = None
+    modernization_diff: Optional[str] = None
+    optimization_diff: Optional[str] = None
+    final_diff: Optional[str] = None
 
 
 class MigrationStatistics(BaseModel):
@@ -191,6 +197,8 @@ class MigrationStatistics(BaseModel):
     tests_failed: int = 0
     warnings: int = 0
     manual_remediation_items: int = 0
+    files_optimized: int = 0
+    files_optimization_skipped: int = 0
 
 
 class MigrationResult(BaseModel):
@@ -207,6 +215,7 @@ class MigrationResult(BaseModel):
     warnings: List[str] = []
     manual_remediation: List[str] = []
     logs: Dict[str, str] = {}
+    optimization_result: Optional[Dict[str, Any]] = None
 
     output_bundle_path: Optional[str] = None
 

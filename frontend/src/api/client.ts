@@ -190,7 +190,7 @@ export const downloadCheckpointZip = (workspacePath: string, projectId: string) 
 
 // ── LLM / AI ───────────────────────────────────────────────────────────────────
 
-/** Check if a Gemini / OpenAI key is configured on the backend. */
+/** Check if a Groq API key is configured on the backend. */
 export const getLlmStatus = () => API.get('/recipes/llm-status');
 
 /** Get AI-powered recipe recommendations using the configured LLM. */
@@ -204,3 +204,18 @@ export const getLlmRecommendations = (data: {
   has_ci: boolean;
   file_counts?: Record<string, number>;
 }) => API.post('/recipes/llm-recommend', data);
+
+// -- Code Optimization ---------------------------------------------------------
+
+/** Run targeted code optimization on files changed by modernization.
+ *  Applies Ruff (Python), dotnet format (C#), Prettier (JS/TS).
+ *  Returns before/after content and unified diffs from real file contents.
+ *  Use dry_run=true for preview without writing any files.
+ */
+export const optimizeCode = (data: {
+  workspace_path: string;
+  project_id: string;
+  changed_files: string[];
+  recipe_ids?: string[];
+  dry_run?: boolean;
+}) => API.post('/recipes/optimize', data);

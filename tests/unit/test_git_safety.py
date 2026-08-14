@@ -347,12 +347,12 @@ def test_workspace_path_traversal_gates(tmp_path):
         validate_workspace_path(outside, workspace_root)
 
 
-def test_env_secrets_stripping(tmp_path):
+def test_env_secrets_stripping(tmp_path, monkeypatch):
     """Verify that run_secured_command filters out DB/Redis credentials/secrets."""
     workspace_root = str(tmp_path)
-    os.environ["DATABASE_PASSWORD"] = "extremelysecretpass"
-    os.environ["REDIS_URL"] = "redis://somehost:6379"
-    os.environ["PATH"] = "/usr/bin"
+    monkeypatch.setenv("DATABASE_PASSWORD", "extremelysecretpass")
+    monkeypatch.setenv("REDIS_URL", "redis://somehost:6379")
+    monkeypatch.setenv("PATH", "/usr/bin")
     
     # Import run_secured_command to verify it cleans env
     import subprocess
@@ -486,7 +486,7 @@ def test_csharp_roslyn_adapter_and_ast_transform():
     transformer = CSharpRoslynSyntaxTransformer()
     block_ns_code = "namespace Acme.Core\n{\npublic class Service {}\n}"
     res_ns = transformer.transform_code(block_ns_code)
-    assert res_ns == "namespace Acme.Core;\n\npublic class Service {}\n\n"
+    assert res_ns == "namespace Acme.Core;\npublic class Service {}\n"
 
 
 

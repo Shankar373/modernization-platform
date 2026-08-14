@@ -1,5 +1,5 @@
 """
-LLMService -- wraps Gemini / OpenAI for AI-powered recipe recommendations.
+LLMService -- wraps Groq for AI-powered recipe recommendations.
 
 Usage:
     from app.core.application.llm_service import get_llm_service
@@ -16,24 +16,24 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are an expert enterprise software modernization architect \
+_SYSTEM_PROMPT = """You are an expert enterprise software modernization architect \\
 embedded in the SystemaOps Modernization Platform.
 
-Your task: Analyze the provided project profile, dependencies, technology stack, \
-security findings, and available recipe/executor capabilities. \
+Your task: Analyze the provided project profile, dependencies, technology stack, \\
+security findings, and available recipe/executor capabilities. \\
 Generate ONLY relevant modernization recommendations.
 
 ## Rules
-1. Recommend recipes ONLY based on actual project evidence (detected languages, \
+1. Recommend recipes ONLY based on actual project evidence (detected languages, \\
    frameworks, dependencies, security findings).
-2. Match recommendations to the project detected languages. Do NOT recommend \
+2. Match recommendations to the project detected languages. Do NOT recommend \\
    Python recipes for a pure C# project or vice versa.
 3. Do NOT recommend a recipe whose id is not in executable_recipe_ids.
-4. Include generic recipes (security, CI/CD, dependency, code-quality) when \
+4. Include generic recipes (security, CI/CD, dependency, code-quality) when \\
    their ids are in executable_recipe_ids.
 5. Avoid duplicate or conflicting recommendations.
 6. Rank recommendations by priority: HIGH -> MEDIUM -> LOW.
-7. Provide a concise "reason" (1-2 sentences) explaining why each recipe applies \
+7. Provide a concise "reason" (1-2 sentences) explaining why each recipe applies \\
    to THIS specific project.
 8. Never fabricate recipe_ids -- use ONLY ids from the available_recipes list.
 9. Return ONLY a valid JSON array. No markdown, no code fences, no explanation.
@@ -55,46 +55,34 @@ Generate ONLY relevant modernization recommendations.
 
 
 class LLMService:
-    """Unified LLM service. Supports Gemini and OpenAI. Falls back gracefully."""
+    """Unified LLM service. Supports Groq exclusively."""
 
     def __init__(self) -> None:
-        self.provider = (settings.llm_provider or "").strip().lower()
-        self._gemini_model = None
+        self.provider = "groq"
         self._openai_client = None
         self._available = False
 
-        if self.provider == "gemini" and settings.gemini_api_key:
-            self._init_gemini()
-        elif self.provider == "openai" and settings.openai_api_key:
-            self._init_openai()
+        if settings.groq_api_key:
+            self._init_groq()
         else:
             logger.info(
-                "LLMService: no provider configured "
-                "(set LLM_PROVIDER + GEMINI_API_KEY or OPENAI_API_KEY in backend/.env)"
+                "LLMService: Groq not configured (set GROQ_API_KEY in backend/.env)"
             )
 
-    def _init_gemini(self) -> None:
-        try:
-            import google.generativeai as genai  # type: ignore
-            genai.configure(api_key=settings.gemini_api_key)
-            self._gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-            self._available = True
-            logger.info("LLMService: Gemini initialised (gemini-1.5-flash)")
-        except ImportError:
-            logger.warning("LLMService: google-generativeai not installed. pip install google-generativeai")
-        except Exception as exc:
-            logger.error("LLMService: Gemini init failed -- %s", exc)
-
-    def _init_openai(self) -> None:
+    def _init_groq(self) -> None:
         try:
             from openai import OpenAI  # type: ignore
-            self._openai_client = OpenAI(api_key=settings.openai_api_key)
+            self._openai_client = OpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=settings.groq_api_key
+            )
+            self._groq_model = settings.groq_model
             self._available = True
-            logger.info("LLMService: OpenAI initialised (gpt-4o-mini)")
+            logger.info("LLMService: Groq initialised (%s)", settings.groq_model)
         except ImportError:
             logger.warning("LLMService: openai package not installed. pip install openai")
         except Exception as exc:
-            logger.error("LLMService: OpenAI init failed -- %s", exc)
+            logger.error("LLMService: Groq init failed -- %s", exc)
 
     @property
     def is_available(self) -> bool:
@@ -112,12 +100,12 @@ class LLMService:
 
         user_content = self._build_user_content(project_profile, available_recipes, executable_recipe_ids)
         raw = self._call_llm(user_content)
-        return self._parse_response(raw, executable_recipe_ids)
+        return self._parse_response(raw, executable_recipe_ids, project_profile, available_recipes)
 
     def generate_completion(self, system_prompt: str, user_content: str) -> str:
         """Generic text completion for summaries, reports, etc."""
         if not self._available:
-            raise RuntimeError("LLM not configured. Set LLM_PROVIDER and the matching API key.")
+            raise RuntimeError("LLM not configured. Set GROQ_API_KEY.")
         return self._call_llm(user_content, system_prompt=system_prompt)
 
     def _build_user_content(
@@ -149,13 +137,9 @@ class LLMService:
 
     def _call_llm(self, user_content: str, system_prompt: str = _SYSTEM_PROMPT) -> str:
         try:
-            if self._gemini_model is not None:
-                prompt = f"{system_prompt}\n\n---\n{user_content}"
-                response = self._gemini_model.generate_content(prompt)
-                return response.text or ""
             if self._openai_client is not None:
                 response = self._openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=settings.groq_model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_content},
@@ -168,7 +152,13 @@ class LLMService:
             logger.error("LLMService._call_llm failed: %s", exc)
         return ""
 
-    def _parse_response(self, raw: str, executable_ids: List[str]) -> List[Dict[str, Any]]:
+    def _parse_response(
+        self,
+        raw: str,
+        executable_ids: List[str],
+        project_profile: Dict[str, Any],
+        available_recipes: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
         if not raw.strip():
             return []
         cleaned = raw.strip()
@@ -190,6 +180,10 @@ class LLMService:
         if not isinstance(data, list):
             return []
 
+        # Get recipe-to-language mapping from available_recipes
+        recipe_langs = {r["id"]: r.get("language", "all").lower() for r in available_recipes}
+        project_langs = {lang.lower() for lang in project_profile.get("languages", [])}
+
         executable_set = set(executable_ids)
         validated: List[Dict[str, Any]] = []
         seen: set = set()
@@ -199,6 +193,23 @@ class LLMService:
             rid = item.get("recipe_id", "")
             if not rid or rid in seen or rid not in executable_set:
                 continue
+
+            # Language validation
+            recipe_lang = recipe_langs.get(rid, "all")
+            if recipe_lang not in ("all", "generic", "yaml", "json", "docker", "ci", "cd"):
+                compatible = False
+                for pl in project_langs:
+                    if pl in recipe_lang or recipe_lang in pl:
+                        compatible = True
+                        break
+                if not compatible:
+                    logger.warning(
+                        "Filtering out language-incompatible recipe: %s for project languages %s",
+                        rid,
+                        list(project_langs)
+                    )
+                    continue
+
             item.setdefault("executable", True)
             item.setdefault("capability_status", "AVAILABLE")
             item.setdefault("risk", "LOW")

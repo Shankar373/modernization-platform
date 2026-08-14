@@ -8,6 +8,12 @@ export interface FileChangeMetadata {
   before_content?: string;
   after_content?: string;
   changes?: Array<{ type: string; description: string }>;
+  original_content?: string;
+  modernized_content?: string;
+  optimized_content?: string;
+  modernization_diff?: string;
+  optimization_diff?: string;
+  final_diff?: string;
 }
 
 export interface MigrationStatistics {
@@ -241,3 +247,46 @@ export interface GitCheckpointResult {
   message?: string;
 }
 
+
+// -- Code Optimization Types ---------------------------------------------------
+
+export interface SkippedFile {
+  file: string;
+  reason: string;
+}
+
+export interface OptimizedFileChange {
+  file: string;
+  recipe: string;
+  optimization: string;
+  before_content: string;
+  after_content: string;
+  diff: string;
+  changed: boolean;
+  validation_status: 'PASSED' | 'FAILED' | 'SKIPPED';
+  original_content?: string;
+  modernized_content?: string;
+  optimized_content?: string;
+  modernization_diff?: string;
+  optimization_diff?: string;
+  final_diff?: string;
+}
+
+export interface OptimizationResult {
+  success: boolean;
+  dry_run: boolean;
+  files_scanned: number;
+  files_optimized: number;
+  files_changed: number;
+  files_unchanged: number;
+  files_skipped: number;
+  files_failed: number;
+  skipped_files: SkippedFile[];
+  optimized_files: OptimizedFileChange[];
+  build_passed: boolean;
+  tests_passed?: boolean;
+  build_output: string;
+  rolled_back: boolean;
+  error?: string;
+  summary?: string;
+}

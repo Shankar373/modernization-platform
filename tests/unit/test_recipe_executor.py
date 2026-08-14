@@ -23,16 +23,23 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dotnet_toolchain():
+    import subprocess
+    real_run = subprocess.run
+
+    def conditional_run(cmd, *args, **kwargs):
+        # Only intercept dotnet build/test/format subcommands.
+        # Let node (for js_modernizer), RoslynTool.dll, and all other processes run real.
+        if (isinstance(cmd, list) and len(cmd) >= 2
+                and str(cmd[0]) == "dotnet"
+                and str(cmd[1]) in ("build", "test", "format")):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="Build succeeded.", stderr=""
+            )
+        return real_run(cmd, *args, **kwargs)
+
     with patch("shutil.which", return_value="mock_dotnet"), \
-         patch("subprocess.run") as mock_run:
-        class MockCompletedProcess:
-            returncode = 0
-            stdout = "Build succeeded."
-            stderr = ""
-        mock_run.return_value = MockCompletedProcess()
+         patch("subprocess.run", side_effect=conditional_run):
         yield
-
-
 
 @pytest.fixture
 def ws(tmp_path: Path) -> Path:
@@ -52,12 +59,12 @@ def test_js_esm_apply_writes_file(ws: Path):
     (ws / "app.js").write_text('const fs = require("fs");\n', encoding="utf-8")
     res = run_recipe("js-esm", "esm", str(ws), dry_run=False)
     assert res.status == "EXECUTED"
-    assert (ws / "app.js").read_text(encoding="utf-8") == "import fs from 'fs';\n"
+    assert (ws / "app.js").read_text(encoding="utf-8") == 'import fs from "fs";\n'
 
 
 def test_js_esm_converter():
     out = _to_esm('const { a, b } = require("lib");\nmodule.exports = a;\n')
-    assert "import {a, b} from 'lib';" in out
+    assert 'import { a, b } from "lib";' in out
     assert "export default a;" in out
 
 

@@ -13,6 +13,9 @@ never touch ignored paths (node_modules, .git, venv, dist, etc.).
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import difflib
 import json
 import re
@@ -146,38 +149,53 @@ def run_recipe(recipe_id: str, recipe_name: str, workspace_path: str, dry_run: b
 
 # ── Handlers: JS / TS ──────────────────────────────────────────────────────────
 
-_REQUIRE_PATTERNS = [
-    (re.compile(r"^\s*const\s+(\w+)\s*=\s*require\(['\"]([^'\"]+)['\"]\)\s*;?", re.MULTILINE),
-     r"import \1 from '\2';"),
-    (re.compile(r"^\s*const\s+\{([^}]+)\}\s*=\s*require\(['\"]([^'\"]+)['\"]\)\s*;?", re.MULTILINE),
-     lambda m: f"import {{{m.group(1).strip()}}} from '{m.group(2)}';"),
-]
-
-_MODULE_EXPORT_DEFAULT = re.compile(r"^\s*module\.exports\s*=\s*(.+?)\s*;?\s*$", re.MULTILINE)
-_MODULE_EXPORT_NAMED = re.compile(r"^\s*module\.exports\.(\w+)\s*=\s*(.+?)\s*;?\s*$", re.MULTILINE)
-_EXPORTS_NAMED = re.compile(r"^\s*exports\.(\w+)\s*=\s*(.+?)\s*;?\s*$", re.MULTILINE)
+def _run_js_tool_on_content(command: str, content: str) -> str:
+    import tempfile
+    import subprocess
+    from pathlib import Path
+    
+    js_tool_path = Path(__file__).parents[2] / "js_tool" / "js_modernizer.js"
+    if not js_tool_path.exists():
+        raise FileNotFoundError(f"js_modernizer.js not found at {js_tool_path}")
+        
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".ts" if "any" in command else ".js", delete=False, mode="w", encoding="utf-8")
+    tmp_path = Path(tmp_file.name)
+    try:
+        tmp_file.write(content)
+        tmp_file.close()
+        
+        cmd = ["node", str(js_tool_path), command, str(tmp_path)]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            raise RuntimeError(f"js_modernizer failed: {res.stderr or res.stdout}")
+        return tmp_path.read_text(encoding="utf-8")
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 def _to_esm(content: str) -> str:
-    result = content
-    for pat, repl in _REQUIRE_PATTERNS:
-        if callable(repl):
-            result = pat.sub(repl, result)
-        else:
-            result = pat.sub(repl, result)
+    try:
+        return _run_js_tool_on_content("js-esm", content)
+    except Exception as e:
+        logger.warning("AST _to_esm failed: %s, fallback to original", e)
+        return content
 
-    def _named(m: re.Match) -> str:
-        # Only rewrite simple assignments (identifier / literal / member), skip functions/classes
-        expr = m.group(2).strip()
-        if re.match(r"^[$\w.\][\'\"]+$", expr):
-            return f"export const {m.group(1)} = {expr};"
-        return m.group(0)
 
-    result = _MODULE_EXPORT_NAMED.sub(_named, result)
-    result = _EXPORTS_NAMED.sub(_named, result)
-    result = _MODULE_EXPORT_DEFAULT.sub(lambda m: f"export default {m.group(1).strip() or '{}'};" if m.group(
-        1).strip() else m.group(0), result)
-    return result
+def _add_optional_chaining(content: str) -> str:
+    try:
+        return _run_js_tool_on_content("js-optional-chaining", content)
+    except Exception as e:
+        logger.warning("AST _add_optional_chaining failed: %s, fallback to original", e)
+        return content
+
+
+def _replace_any(content: str) -> str:
+    try:
+        return _run_js_tool_on_content("ts-no-any", content)
+    except Exception as e:
+        logger.warning("AST _replace_any failed: %s, fallback to original", e)
+        return content
 
 
 @register("js-esm")
@@ -207,24 +225,6 @@ def _js_esm(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     return res
 
 
-# ── Handlers: Optional chaining ───────────────────────────────────────────────
-
-# x && x.y   →  x?.y
-_AND_CHAIN = re.compile(r"\b([A-Za-z_$][\w$]*)\s*&&\s*\1\.", )
-# x != null && x.y  /  x !== null && x.y
-_NULL_AND = re.compile(r"\b([A-Za-z_$][\w$]*)\s*(?:!==\s*null|!= null|!= undefined|!==\s*undefined)\s*&&\s*\1\.")
-# x == null ? a : x.y  →  x?.y ?? a   (simplified: guarded member access)
-_TARGET = re.compile(r"\b([A-Za-z_$][\w$]*)\s*[!=]==?\s*null\s*\?\s*(?:null|undefined)\s*:\s*\1\.")
-
-
-def _add_optional_chaining(content: str) -> str:
-    result = content
-    result = _NULL_AND.sub(r"\1?.", result)
-    result = _AND_CHAIN.sub(r"\1?.", result)
-    result = _TARGET.sub(r"\1?.", result)
-    return result
-
-
 @register("js-optional-chaining")
 def _js_optional_chaining(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     res = RecipeExecutionResult(recipe_id="js-optional-chaining", recipe_name="Optional Chaining & Nullish Coalescing")
@@ -250,11 +250,10 @@ def _js_optional_chaining(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     return res
 
 
-# ── Handlers: TypeScript strict mode ──────────────────────────────────────────
-
 @register("ts-strict-mode")
 def _ts_strict_mode(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     res = RecipeExecutionResult(recipe_id="ts-strict-mode", recipe_name="TypeScript Strict Mode")
+    import json
     candidates = list(ws.rglob("tsconfig.json")) + list(ws.rglob("tsconfig.base.json"))
     if not candidates:
         res.status = "NOT_APPLICABLE"
@@ -288,20 +287,6 @@ def _ts_strict_mode(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         res.status = "NOT_APPLICABLE"
         res.notes.append("TypeScript strict mode was already enabled.")
     return res
-
-
-# ── Handlers: Replace any ──────────────────────────────────────────────────────
-
-_ANY_ANNOTATION = re.compile(r"\bany\b(?=\s*[,)}\]])")
-
-
-def _replace_any(content: str) -> str:
-    # Replace 'any' in annotation positions (: any, <any>, any[]) with 'unknown',
-    # and `any[]` with `unknown[]`; leaves `any` usage in expressions untouched.
-    result = re.sub(r"\bany\s*\[\s*\]", "unknown[]", content)
-    result = re.sub(r"(:\s*)any\b", r"\1unknown", result)
-    result = re.sub(r"<any>", "<unknown>", result)
-    return result
 
 
 @register("ts-no-any")
@@ -670,6 +655,17 @@ def _csharp_recipe_result(rid: str, name: str, ws: Path, dry_run: bool, applied_
         res.status = "FAILED"
         res.success = False
         res.errors.extend(validation.errors)
+        # Rollback changes on disk
+        for change in applied_changes:
+            full_path = ws / change.file
+            try:
+                if change.status == "ADDED":
+                    if full_path.exists():
+                        full_path.unlink()
+                elif change.status in ("DELETED", "MODIFIED"):
+                    full_path.write_text(change.before_content, encoding="utf-8")
+            except Exception as e:
+                res.errors.append(f"Failed to rollback {change.file}: {str(e)}")
     else:
         res.status = "EXECUTED"
         res.success = True
@@ -738,6 +734,17 @@ def _cs_net6_upgrade(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         res.status = "FAILED"
         res.success = False
         res.errors.extend(validation.errors)
+        # Rollback changes on disk
+        for change in result.changed_files:
+            full_path = ws / change.file
+            try:
+                if change.status == "ADDED":
+                    if full_path.exists():
+                        full_path.unlink()
+                elif change.status in ("DELETED", "MODIFIED"):
+                    full_path.write_text(change.before_content, encoding="utf-8")
+            except Exception as e:
+                res.errors.append(f"Failed to rollback {change.file}: {str(e)}")
     return res
 
 
@@ -926,20 +933,29 @@ def _cs_package_reference(ws: Path, dry_run: bool) -> RecipeExecutionResult:
 
 @register("cs-file-scoped-namespace")
 def _cs_file_scoped_namespace(ws: Path, dry_run: bool) -> RecipeExecutionResult:
-    """Convert C# namespace declarations to file-scoped syntax."""
+    """Convert C# namespace declarations to file-scoped syntax using real Roslyn."""
     from app.adapters.base import CSharpRoslynSyntaxTransformer
     transformer = CSharpRoslynSyntaxTransformer()
     applied = []
     
-    for f in _iter_files(ws, suffixes={".cs"}):
-        orig = f.read_text(encoding="utf-8", errors="replace")
-        new = transformer.transform_code(orig, "net8.0")
-        if new != orig:
-            if not dry_run:
-                f.write_text(new, encoding="utf-8")
+    files = [str(f.relative_to(ws)) for f in _iter_files(ws, suffixes={".cs"})]
+    if not files:
+        return _csharp_recipe_result("cs-file-scoped-namespace", "File-scoped Namespace Conversion", ws, dry_run, applied)
+
+    res_dict = transformer.transform_files("cs-file-scoped-namespace", str(ws), files, dry_run)
+    if not res_dict.get("Success", False):
+        raise RuntimeError(f"RoslynTool failed: {res_dict.get('ErrorMessage')}")
+        
+    for changed_file in res_dict.get("ChangedFiles", []):
+        if changed_file.get("Status") == "MODIFIED":
+            rel_path = changed_file["FilePath"]
             applied.append(_build_change(
-                str(f.relative_to(ws)), orig, new, "roslyn-file-scoped-ns",
-                "CS_FILE_SCOPED_NAMESPACE", "Converted namespace block to file-scoped namespace (C# 10+)"
+                rel_path,
+                changed_file["BeforeContent"],
+                changed_file["AfterContent"],
+                "roslyn-file-scoped-ns",
+                "CS_FILE_SCOPED_NAMESPACE",
+                "Converted namespace block to file-scoped namespace (C# 10+)"
             ))
 
     return _csharp_recipe_result("cs-file-scoped-namespace", "File-scoped Namespace Conversion", ws, dry_run, applied)
@@ -948,41 +964,33 @@ def _cs_file_scoped_namespace(ws: Path, dry_run: bool) -> RecipeExecutionResult:
 @register("cs-var-modernization")
 def _cs_var_modernization(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     """Replace explicit variable declarations with var using C# SemanticModel/SyntaxTree analysis."""
+    from app.adapters.base import CSharpRoslynSyntaxTransformer
+    transformer = CSharpRoslynSyntaxTransformer()
     applied = []
     
-    for f in _iter_files(ws, suffixes={".cs"}):
-        orig = f.read_text(encoding="utf-8", errors="replace")
-        
-        from app.adapters.base import CSharpSyntaxTree, CSharpSemanticModel, LocalDeclarationStatementSyntax
-        
-        tree = CSharpSyntaxTree.parse_text(orig)
-        semantic_model = CSharpSemanticModel(tree)
-        
-        declarations = [node for node in tree.root.descendant_nodes() if isinstance(node, LocalDeclarationStatementSyntax)]
-        
-        changed = False
-        new_content = orig
-        for decl in declarations:
-            if semantic_model.is_var_conversion_safe(decl):
-                decl_text = decl.get_text()
-                pattern = r"\b" + re.escape(decl.declared_type) + r"\b"
-                new_decl_text = re.sub(pattern, "var", decl_text, count=1)
-                new_content = new_content.replace(decl_text, new_decl_text, 1)
-                changed = True
+    files = [str(f.relative_to(ws)) for f in _iter_files(ws, suffixes={".cs"})]
+    if not files:
+        return _csharp_recipe_result("cs-var-modernization", "Local Variable var Modernization", ws, dry_run, applied)
 
-        if changed:
-            if not dry_run:
-                f.write_text(new_content, encoding="utf-8")
+    res_dict = transformer.transform_files("cs-var-modernization", str(ws), files, dry_run)
+    if not res_dict.get("Success", False):
+        raise RuntimeError(f"RoslynTool failed: {res_dict.get('ErrorMessage')}")
+        
+    for changed_file in res_dict.get("ChangedFiles", []):
+        if changed_file.get("Status") == "MODIFIED":
+            rel_path = changed_file["FilePath"]
             applied.append(_build_change(
-                str(f.relative_to(ws)), orig, new_content, "roslyn-var-modernization",
-                "CS_VAR_MODERNIZATION", "Replaced redundant explicit type with var via C# SemanticModel analysis"
+                rel_path,
+                changed_file["BeforeContent"],
+                changed_file["AfterContent"],
+                "roslyn-var-modernization",
+                "CS_VAR_MODERNIZATION",
+                "Replaced redundant explicit type with var via C# SemanticModel analysis"
             ))
 
     return _csharp_recipe_result("cs-var-modernization", "Local Variable var Modernization", ws, dry_run, applied)
 
 
-
-# ── Handlers: Python (extended) ────────────────────────────────────────────────
 
 @register("py-pathlib")
 def _py_pathlib_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:

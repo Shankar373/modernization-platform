@@ -39,7 +39,7 @@ class LLMRecommendRequest(BaseModel):
 @router.post("/recipes/llm-recommend")
 async def llm_recommend_recipes(req: LLMRecommendRequest):
     """
-    Use the configured LLM (Gemini / OpenAI) to generate intelligent,
+    Use the configured Groq LLM to generate intelligent,
     project-specific recipe recommendations.
 
     Falls back to { llm_powered: false } when no LLM key is set.
@@ -54,7 +54,7 @@ async def llm_recommend_recipes(req: LLMRecommendRequest):
             "llm_powered": False,
             "recommendations": [],
             "reasoning": (
-                "LLM not configured. Add LLM_PROVIDER=gemini and GEMINI_API_KEY "
+                "LLM not configured. Add LLM_PROVIDER=groq and GROQ_API_KEY "
                 "to backend/.env and restart the server."
             ),
             "total": 0,
@@ -102,6 +102,8 @@ async def llm_recommend_recipes(req: LLMRecommendRequest):
 
 @router.get("/recipes/llm-status")
 async def llm_status():
+    from app.config import settings
+    logger.info("llm_status: provider=%s, model=%s", settings.llm_provider, settings.groq_model)
     """Returns the current LLM configuration status."""
     from app.core.application.llm_service import get_llm_service
     llm = get_llm_service()

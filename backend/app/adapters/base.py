@@ -517,43 +517,91 @@ class CSharpRoslynSyntaxTransformer:
     and SemanticModel specifications.
     """
 
+    def transform_files(self, recipe_id: str, workspace_path: str, files: List[str], dry_run: bool) -> dict:
+        """Invoke the compiled RoslynTool via stdin JSON protocol to process files."""
+        import subprocess
+        import json
+        from pathlib import Path
+        
+        adapter_dir = Path(__file__).resolve().parent
+        backend_dir = adapter_dir.parent.parent
+        
+        # Release path
+        roslyn_tool_dll = backend_dir / "roslyn_tool" / "bin" / "Release" / "net8.0" / "RoslynTool.dll"
+        if not roslyn_tool_dll.exists():
+            # Try Debug path as fallback
+            roslyn_tool_dll = backend_dir / "roslyn_tool" / "bin" / "Debug" / "net8.0" / "RoslynTool.dll"
+            
+        if not roslyn_tool_dll.exists():
+            return {"Success": False, "ErrorMessage": f"RoslynTool.dll not found. Looked in {roslyn_tool_dll.parent}"}
+            
+        cmd = ["dotnet", str(roslyn_tool_dll)]
+        
+        request_payload = {
+            "WorkspacePath": workspace_path,
+            "RecipeId": recipe_id,
+            "Files": files,
+            "TargetFramework": "net8.0",
+            "DryRun": dry_run
+        }
+        
+        try:
+            p = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8"
+            )
+            stdout, stderr = p.communicate(input=json.dumps(request_payload))
+            if p.returncode != 0:
+                return {
+                    "Success": False,
+                    "ErrorMessage": f"RoslynTool exited with non-zero code {p.returncode}. Stderr: {stderr.strip()}"
+                }
+            
+            try:
+                response = json.loads(stdout)
+                return response
+            except json.JSONDecodeError:
+                return {
+                    "Success": False,
+                    "ErrorMessage": f"Failed to parse JSON response from RoslynTool. Raw stdout: {stdout.strip()}. Stderr: {stderr.strip()}"
+                }
+        except Exception as e:
+            return {"Success": False, "ErrorMessage": f"Failed to spawn RoslynTool subprocess: {str(e)}"}
+
     def transform_code(self, code: str, target_version: str = "net8.0") -> str:
-        """Convert C# namespace declarations to file-scoped syntax using SyntaxTree APIs."""
-        tree = CSharpSyntaxTree.parse_text(code)
-        namespaces = [node for node in tree.root.descendant_nodes() if isinstance(node, NamespaceDeclarationSyntax)]
+        """Convert C# namespace declarations to file-scoped syntax using real RoslynTool."""
+        import tempfile
+        import os
+        from pathlib import Path
         
-        if len(namespaces) != 1:
-            return code
+        with tempfile.NamedTemporaryFile(suffix=".cs", delete=False, mode="w", encoding="utf-8") as temp:
+            temp.write(code)
+            temp_name = temp.name
             
-        ns = namespaces[0]
-        body_tokens = ns.tokens[ns.open_brace_idx + 1:ns.close_brace_idx]
-        body_text = "".join(body_tokens).strip()
-        
-        indent = ""
-        ns_idx = tree.root.tokens.index("namespace")
-        k = ns_idx - 1
-        while k >= 0 and tree.root.tokens[k].isspace() and "\n" not in tree.root.tokens[k]:
-            indent = tree.root.tokens[k] + indent
-            k -= 1
-            
-        out_lines = []
-        for ln in body_text.split("\n"):
-            if ln.strip() == "":
-                out_lines.append("")
-            elif indent and ln.startswith(indent):
-                out_lines.append(ln[len(indent):])
-            else:
-                out_lines.append(ln)
-        dedented_body = "\n".join(out_lines).strip()
-        
-        leading_text = "".join(tree.root.tokens[:ns_idx])
-        return leading_text + f"namespace {ns.name};\n\n" + dedented_body + "\n\n"
+        try:
+            temp_path = Path(temp_name)
+            res = self.transform_files(
+                recipe_id="cs-file-scoped-namespace",
+                workspace_path=str(temp_path.parent),
+                files=[temp_path.name],
+                dry_run=False
+            )
+            if res.get("Success") and res.get("ChangedFiles"):
+                modified_content = temp_path.read_text(encoding="utf-8")
+                return modified_content
+        finally:
+            try:
+                os.unlink(temp_name)
+            except Exception:
+                pass
+        return code
 
     def transform_csproj(self, content: str, target_framework: str = "net8.0") -> str:
         tf = target_framework if target_framework.startswith("net") else "net8.0"
-        # Upgrade single-target and multi-target properties. Legacy
-        # <TargetFrameworkVersion> (non-SDK style) is deliberately left alone
-        # because converting it requires an SDK-style project rewrite.
         result = re.sub(
             r"<TargetFramework>\s*[^<]+?\s*</TargetFramework>",
             f"<TargetFramework>{tf}</TargetFramework>",
@@ -568,7 +616,7 @@ class CSharpRoslynSyntaxTransformer:
 
 class CSharpRoslynAdapter(MigrationAdapter):
     """
-    C# modernization adapter powered by Roslyn (C# Compiler Platform) & dotnet format.
+    C# modernization adapter powered by Roslyn (C# Compiler Platform) & dotnet format/test.
     """
     @property
     def language(self) -> str:
@@ -616,7 +664,6 @@ class CSharpRoslynAdapter(MigrationAdapter):
                 description="C# syntax modernization (file-scoped namespaces) plus dotnet format cleanup when the CLI is available",
                 notes="" if has_dotnet else "dotnet CLI not found on host — syntax modernization only, no dotnet format",
             ),
-
             MigrationCapability(
                 name="csharp-roslyn-ast",
                 language="csharp",
@@ -625,7 +672,7 @@ class CSharpRoslynAdapter(MigrationAdapter):
                 source_versions=["C# 7.0", "C# 8.0", "C# 9.0"],
                 target_versions=["C# 10.0", "C# 11.0", "C# 12.0"],
                 risk=RiskLevel.LOW,
-                description="File-scoped namespace conversion (C# 10+) via string/comment-aware lexical transformation",
+                description="File-scoped namespace conversion (C# 10+) via real Roslyn compilation and syntax transformation",
             ),
             MigrationCapability(
                 name="csharp-dotnet-upgrade",
@@ -670,7 +717,6 @@ class CSharpRoslynAdapter(MigrationAdapter):
             profile=migration_profile,
         )
 
-
     def dry_run(self, workspace_path: str, plan: MigrationPlan) -> DryRunResult:
         ws = Path(workspace_path)
         cs_files = [f for f in ws.rglob("*.cs") if not is_ignored_path(f)]
@@ -686,30 +732,28 @@ class CSharpRoslynAdapter(MigrationAdapter):
         modified_files = []
 
         # 1. Roslyn AST Syntax Transformer (.cs files)
-        for cs_file in ws.rglob("*.cs"):
-            if is_ignored_path(cs_file):
-                continue
-            try:
-                orig = cs_file.read_text(encoding="utf-8", errors="replace")
-                new_code = transformer.transform_code(orig, target_version)
-                if new_code != orig:
-                    cs_file.write_text(new_code, encoding="utf-8")
-                    rel = str(cs_file.relative_to(ws))
-                    modified_files.append(FileChangeMetadata(
-                        file=rel,
-                        status="MODIFIED",
-                        tools=["Roslyn"],
-                        before_content=orig,
-                        after_content=new_code,
-                        diff="".join(difflib.unified_diff(
-                            orig.splitlines(keepends=True),
-                            new_code.splitlines(keepends=True),
-                            fromfile=f"a/{rel}", tofile=f"b/{rel}")),
-                        changes=[{"type": "C#_AST_MODERNIZATION",
-                                  "description": "Converted block namespace to file-scoped namespace (C# 10+)"}],
-                    ))
-            except Exception:
-                pass
+        cs_files = [str(cs_file.relative_to(ws)) for cs_file in ws.rglob("*.cs") if not is_ignored_path(cs_file)]
+        if cs_files:
+            res = transformer.transform_files("cs-file-scoped-namespace", str(ws), cs_files, dry_run=False)
+            if res.get("Success"):
+                for changed_file in res.get("ChangedFiles", []):
+                    if changed_file.get("Status") == "MODIFIED":
+                        rel = changed_file["FilePath"]
+                        orig = changed_file["BeforeContent"]
+                        new_code = changed_file["AfterContent"]
+                        modified_files.append(FileChangeMetadata(
+                            file=rel,
+                            status="MODIFIED",
+                            tools=["Roslyn"],
+                            before_content=orig,
+                            after_content=new_code,
+                            diff="".join(difflib.unified_diff(
+                                orig.splitlines(keepends=True),
+                                new_code.splitlines(keepends=True),
+                                fromfile=f"a/{rel}", tofile=f"b/{rel}")),
+                            changes=[{"type": "C#_AST_MODERNIZATION",
+                                      "description": "Converted block namespace to file-scoped namespace (C# 10+)"}],
+                        ))
         timeline.append({"step": "Roslyn AST syntax modernization", "status": "completed", "ts": datetime.datetime.utcnow().isoformat()})
 
         # 2. .csproj TargetFramework Upgrade
@@ -766,13 +810,15 @@ class CSharpRoslynAdapter(MigrationAdapter):
         )
 
     def validate(self, workspace_path: str, result: MigrationResult) -> ValidationResult:
-        """Validate transformed C# sources by structural brace/paren balance check.
-        Does not fabricate success when the .NET SDK is unavailable — reports
-        actual syntax balance and warns that full compilation requires dotnet CLI."""
+        """Validate transformed C# sources by compiling (dotnet build) and running tests (dotnet test)."""
+        import subprocess
         import shutil
+        from pathlib import Path
+
         errors = []
         warnings = []
         ws = Path(workspace_path)
+        
         cs_files = [f for f in ws.rglob("*.cs") if not is_ignored_path(f)]
         for f in cs_files:
             try:
@@ -785,15 +831,123 @@ class CSharpRoslynAdapter(MigrationAdapter):
                     errors.append(f"{f.name}: unbalanced parentheses ({parens:+d})")
             except OSError as e:
                 errors.append(f"{f.name}: {e}")
-        build_passed = len(errors) == 0
-        if build_passed and not shutil.which("dotnet"):
+
+        if errors:
+            return ValidationResult(
+                build_passed=False,
+                tests_passed=False,
+                tests_total=0,
+                warnings=warnings,
+                errors=errors,
+                raw_output="; ".join(errors)
+            )
+
+        if not shutil.which("dotnet"):
             warnings.append(
                 "Syntax balance validated. dotnet CLI not found on host — "
-                "full compilation and unit-test verification skipped.")
+                "full compilation and unit-test verification skipped."
+            )
+            return ValidationResult(
+                build_passed=True,
+                tests_passed=True,
+                tests_total=0,
+                warnings=warnings,
+                errors=errors,
+                raw_output="; ".join(warnings)
+            )
+
+        project_files = list(ws.glob("*.csproj")) + list(ws.glob("*.sln"))
+        if not project_files:
+            project_files = list(ws.rglob("*.csproj")) + list(ws.rglob("*.sln"))
+
+        build_passed = False
+        tests_passed = None
+        tests_total = 0
+
+        if not project_files:
+            warnings.append("No .csproj or .sln files found in workspace — dotnet build skipped.")
+            return ValidationResult(
+                build_passed=True,
+                tests_passed=None,
+                tests_total=0,
+                warnings=warnings,
+                errors=errors,
+                raw_output="Syntax balance passed."
+            )
+
+        proj_to_build = str(project_files[0])
+        try:
+            build_res = subprocess.run(
+                ["dotnet", "build", proj_to_build],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if build_res.returncode == 0:
+                build_passed = True
+            else:
+                build_passed = False
+                errors.append(f"dotnet build failed with exit code {build_res.returncode}")
+                if build_res.stdout:
+                    errors.append(build_res.stdout)
+                if build_res.stderr:
+                    errors.append(build_res.stderr)
+        except subprocess.TimeoutExpired:
+            errors.append("dotnet build timed out (120s limit)")
+            build_passed = False
+        except Exception as e:
+            errors.append(f"Failed to run dotnet build: {str(e)}")
+            build_passed = False
+
+        if not build_passed:
+            return ValidationResult(
+                build_passed=False,
+                tests_passed=False,
+                tests_total=0,
+                warnings=warnings,
+                errors=errors,
+                raw_output="; ".join(errors)
+            )
+
+        tests_failed_count = 0
+        try:
+            test_res = subprocess.run(
+                ["dotnet", "test", proj_to_build],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            stdout = test_res.stdout or ""
+            
+            import re
+            match = re.search(r"Total:\s*(\d+)", stdout)
+            if match:
+                tests_total = int(match.group(1))
+                passed_match = re.search(r"Passed:\s*(\d+)", stdout)
+                failed_match = re.search(r"Failed:\s*(\d+)", stdout)
+                
+                failed_count = int(failed_match.group(1)) if failed_match else 0
+                tests_failed_count = failed_count
+                tests_passed = (failed_count == 0)
+                if not tests_passed:
+                    errors.append(f"dotnet test failed: {failed_count} tests failed.")
+                    errors.append(stdout)
+            else:
+                tests_passed = None
+                tests_total = 0
+                tests_failed_count = 0
+        except subprocess.TimeoutExpired:
+            warnings.append("dotnet test timed out (120s limit)")
+            tests_passed = False
+        except Exception as e:
+            warnings.append(f"Failed to run dotnet test: {str(e)}")
+            tests_passed = None
+
         return ValidationResult(
             build_passed=build_passed,
-            tests_passed=build_passed,
-            tests_total=0,
+            tests_passed=tests_passed,
+            tests_total=tests_total,
+            tests_failed=tests_failed_count,
             warnings=warnings,
             errors=errors,
             raw_output="; ".join(warnings + errors),
@@ -812,5 +966,3 @@ class CSharpRoslynAdapter(MigrationAdapter):
             "timeline": result.timeline,
             "changed_files": result.changed_files,
         }
-
-

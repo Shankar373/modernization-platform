@@ -284,11 +284,23 @@ class MigrationOrchestrator:
 
         # Update result status based on validation
         if result.status == MigrationStatus.SUCCESS and not validation.build_passed:
-            result.status = MigrationStatus.PARTIALLY_SUCCESSFUL
+            result.status = MigrationStatus.FAILED
+            # Rollback all changes on disk
+            for change in result.changed_files:
+                full_path = Path(workspace_path) / change.file
+                try:
+                    if change.status == "ADDED":
+                        if full_path.exists():
+                            full_path.unlink()
+                    elif change.status in ("DELETED", "MODIFIED"):
+                        full_path.write_text(change.before_content, encoding="utf-8")
+                except Exception as e:
+                    result.warnings.append(f"Failed to rollback {change.file} during orchestrator validation failure: {str(e)}")
 
         result.statistics.build_passed = validation.build_passed
         result.statistics.tests_passed = validation.tests_passed
         result.statistics.tests_failed = validation.tests_failed
+        result.statistics.tests_total = validation.tests_total
         result.logs["validation"] = validation.raw_output
 
         return result
