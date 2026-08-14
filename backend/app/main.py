@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.api import health, ingestion, analysis, migration, reports, capabilities, dependency_analysis, recipes, git_checkpoint
+from app.api import health, ingestion, analysis, migration, reports, capabilities, dependency_analysis, recipes, git_checkpoint, llm_recommend
 from app.db.session import init_db
 
 
@@ -63,3 +63,4 @@ app.include_router(reports.router, prefix="/api/v1", tags=["Reports"])
 app.include_router(dependency_analysis.router, prefix="/api/v1", tags=["Dependency Analysis"])
 app.include_router(recipes.router, prefix="/api/v1", tags=["Recipes"])
 app.include_router(git_checkpoint.router, prefix="/api/v1", tags=["Git Checkpoint"])
+app.include_router(llm_recommend.router, prefix="/api/v1", tags=["AI / LLM"])

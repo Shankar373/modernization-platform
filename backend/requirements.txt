@@ -33,8 +33,5 @@ tomlkit==0.13.2
 packaging>=24.0        # PEP 440 version parsing & specifier evaluation
 asyncpg>=0.29.0
 pg8000==1.31.5
-
-
-
-
-
+google-generativeai>=0.8.0   # Gemini LLM integration
+openai>=1.0.0               # OpenAI integration (optional)

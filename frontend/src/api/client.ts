@@ -188,3 +188,19 @@ export const downloadCheckpointZip = (workspacePath: string, projectId: string) 
   document.body.removeChild(link);
 };
 
+// ── LLM / AI ───────────────────────────────────────────────────────────────────
+
+/** Check if a Gemini / OpenAI key is configured on the backend. */
+export const getLlmStatus = () => API.get('/recipes/llm-status');
+
+/** Get AI-powered recipe recommendations using the configured LLM. */
+export const getLlmRecommendations = (data: {
+  project_id: string;
+  languages: string[];
+  frameworks: string[];
+  dependencies: unknown[];
+  security_findings?: unknown[];
+  has_tests: boolean;
+  has_ci: boolean;
+  file_counts?: Record<string, number>;
+}) => API.post('/recipes/llm-recommend', data);
