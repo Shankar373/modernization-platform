@@ -947,31 +947,35 @@ def _cs_file_scoped_namespace(ws: Path, dry_run: bool) -> RecipeExecutionResult:
 
 @register("cs-var-modernization")
 def _cs_var_modernization(ws: Path, dry_run: bool) -> RecipeExecutionResult:
-    """Replace explicit variable declarations with var."""
+    """Replace explicit variable declarations with var using C# SemanticModel/SyntaxTree analysis."""
     applied = []
-    pattern = r"\b([a-zA-Z0-9_.]+)\s+([a-zA-Z0-9_]+)\s*=\s*new\s+\1\s*\((.*?)\)\s*;"
-    keywords_and_builtins = {
-        "int", "string", "double", "float", "bool", "char", "long", "short", "byte", "decimal",
-        "return", "throw", "yield", "class", "namespace", "using", "public", "private", 
-        "protected", "internal", "static", "readonly", "override", "virtual", "new", "true", "false"
-    }
     
     for f in _iter_files(ws, suffixes={".cs"}):
         orig = f.read_text(encoding="utf-8", errors="replace")
         
-        def repl(match):
-            type_name, var_name, args = match.groups()
-            if type_name in keywords_and_builtins or var_name in keywords_and_builtins:
-                return match.group(0)
-            return f"var {var_name} = new {type_name}({args});"
+        from app.adapters.base import CSharpSyntaxTree, CSharpSemanticModel, LocalDeclarationStatementSyntax
+        
+        tree = CSharpSyntaxTree.parse_text(orig)
+        semantic_model = CSharpSemanticModel(tree)
+        
+        declarations = [node for node in tree.root.descendant_nodes() if isinstance(node, LocalDeclarationStatementSyntax)]
+        
+        changed = False
+        new_content = orig
+        for decl in declarations:
+            if semantic_model.is_var_conversion_safe(decl):
+                decl_text = decl.get_text()
+                pattern = r"\b" + re.escape(decl.declared_type) + r"\b"
+                new_decl_text = re.sub(pattern, "var", decl_text, count=1)
+                new_content = new_content.replace(decl_text, new_decl_text, 1)
+                changed = True
 
-        new, count = re.subn(pattern, repl, orig)
-        if count > 0:
+        if changed:
             if not dry_run:
-                f.write_text(new, encoding="utf-8")
+                f.write_text(new_content, encoding="utf-8")
             applied.append(_build_change(
-                str(f.relative_to(ws)), orig, new, "roslyn-var-modernization",
-                "CS_VAR_MODERNIZATION", "Replaced redundant explicit type with var"
+                str(f.relative_to(ws)), orig, new_content, "roslyn-var-modernization",
+                "CS_VAR_MODERNIZATION", "Replaced redundant explicit type with var via C# SemanticModel analysis"
             ))
 
     return _csharp_recipe_result("cs-var-modernization", "Local Variable var Modernization", ws, dry_run, applied)

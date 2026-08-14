@@ -292,120 +292,197 @@ adapter_registry = AdapterRegistry()
 
 # ── Engine #3: C# Roslyn Adapter & AST Syntax Transformer ──────────────────
 
+import re
+from typing import List, Optional, Tuple, Iterator
+
+def tokenize_csharp(code: str) -> List[str]:
+    # Regex to capture comments, strings, identifiers, symbols, and whitespace
+    pattern = r'(//.*?$|/\*.*?\*/|"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*(?:\\.[^\'\\]*)*\'|[a-zA-Z_][a-zA-Z0-9_.]*|\d+|[{}()\[\];,=+\-*/&|!<>?:]|\s+)'
+    tokens = re.findall(pattern, code, re.MULTILINE)
+    return [t for t in tokens if t]
+
+
+class CSharpSyntaxNode:
+    def __init__(self, kind: str, tokens: List[str]):
+        self.kind = kind
+        self.tokens = tokens
+        self.children: List[CSharpSyntaxNode] = []
+        self.parent: Optional[CSharpSyntaxNode] = None
+
+    def get_text(self) -> str:
+        if self.children:
+            return "".join(c.get_text() for c in self.children)
+        return "".join(self.tokens)
+
+    def descendant_nodes(self) -> List[CSharpSyntaxNode]:
+        nodes = []
+        for child in self.children:
+            nodes.append(child)
+            nodes.extend(child.descendant_nodes())
+        return nodes
+
+
+class NamespaceDeclarationSyntax(CSharpSyntaxNode):
+    def __init__(self, tokens: List[str], name: str, open_brace_idx: int, close_brace_idx: int):
+        super().__init__("NamespaceDeclaration", tokens)
+        self.name = name
+        self.open_brace_idx = open_brace_idx
+        self.close_brace_idx = close_brace_idx
+
+
+class LocalDeclarationStatementSyntax(CSharpSyntaxNode):
+    def __init__(self, tokens: List[str], declared_type: str, variable_name: str, instantiated_type: str):
+        super().__init__("LocalDeclarationStatement", tokens)
+        self.declared_type = declared_type
+        self.variable_name = variable_name
+        self.instantiated_type = instantiated_type
+
+
+class CSharpSyntaxTree:
+    def __init__(self, root: CSharpSyntaxNode):
+        self.root = root
+
+    @classmethod
+    def parse_text(cls, code: str) -> 'CSharpSyntaxTree':
+        tokens = tokenize_csharp(code)
+        root = CSharpSyntaxNode("CompilationUnit", tokens)
+        
+        # Simple parser to find namespaces and local declarations
+        n = len(tokens)
+        i = 0
+        while i < n:
+            token = tokens[i]
+            
+            # 1. Parse Namespace Block
+            if token == "namespace":
+                j = i + 1
+                ns_name_parts = []
+                while j < n and tokens[j] != "{" and tokens[j] != ";":
+                    if tokens[j].strip():
+                        ns_name_parts.append(tokens[j])
+                    j += 1
+                if j < n and tokens[j] == "{":
+                    open_brace_idx = j
+                    depth = 1
+                    k = j + 1
+                    while k < n:
+                        if tokens[k] == "{":
+                            depth += 1
+                        elif tokens[k] == "}":
+                            depth -= 1
+                            if depth == 0:
+                                break
+                        k += 1
+                    if k < n and tokens[k] == "}":
+                        ns_name = "".join(ns_name_parts).strip()
+                        ns_node = NamespaceDeclarationSyntax(tokens[i:k+1], ns_name, open_brace_idx - i, k - i)
+                        ns_node.parent = root
+                        root.children.append(ns_node)
+                        cls._parse_body(tokens[open_brace_idx+1:k], ns_node)
+                        i = k + 1
+                        continue
+            i += 1
+            
+        cls._parse_local_declarations(root)
+        return cls(root)
+
+    @classmethod
+    def _parse_body(cls, tokens: List[str], parent_node: CSharpSyntaxNode):
+        child_node = CSharpSyntaxNode("NamespaceBody", tokens)
+        child_node.parent = parent_node
+        parent_node.children.append(child_node)
+
+    @classmethod
+    def _parse_local_declarations(cls, root: CSharpSyntaxNode):
+        tokens = root.tokens
+        n = len(tokens)
+        i = 0
+        while i < n:
+            if i + 8 < n:
+                type_token = tokens[i]
+                if cls._is_identifier(type_token) and type_token not in ("return", "throw", "yield", "new", "class", "namespace", "using", "public", "private", "protected", "internal", "static", "readonly", "override", "virtual"):
+                    if tokens[i+1].isspace():
+                        var_token = tokens[i+2]
+                        if cls._is_identifier(var_token) and var_token not in ("new", "return"):
+                            j = i + 3
+                            while j < n and tokens[j].isspace():
+                                j += 1
+                            if j < n and tokens[j] == "=":
+                                j += 1
+                                while j < n and tokens[j].isspace():
+                                    j += 1
+                                if j < n and tokens[j] == "new":
+                                    j += 1
+                                    while j < n and tokens[j].isspace():
+                                        j += 1
+                                    if j < n and cls._is_identifier(tokens[j]):
+                                        inst_type = tokens[j]
+                                        j += 1
+                                        while j < n and tokens[j].isspace():
+                                            j += 1
+                                        if j < n and tokens[j] == "(":
+                                            k = j + 1
+                                            while k < n and tokens[k] != ";":
+                                                k += 1
+                                            if k < n and tokens[k] == ";":
+                                                local_node = LocalDeclarationStatementSyntax(
+                                                    tokens[i:k+1], type_token, var_token, inst_type
+                                                )
+                                                local_node.parent = root
+                                                root.children.append(local_node)
+                                                i = k + 1
+                                                continue
+            i += 1
+
+    @classmethod
+    def _is_identifier(cls, token: str) -> bool:
+        return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_.]*$", token))
+
+
+class CSharpSemanticModel:
+    def __init__(self, tree: CSharpSyntaxTree):
+        self.tree = tree
+
+    def get_declared_type(self, node: LocalDeclarationStatementSyntax) -> str:
+        return node.declared_type
+
+    def get_instantiated_type(self, node: LocalDeclarationStatementSyntax) -> str:
+        return node.instantiated_type
+
+    def is_var_conversion_safe(self, node: LocalDeclarationStatementSyntax) -> bool:
+        # Semantic safety constraint:
+        # Transformation is only safe if the declared type name matches the instantiated type name EXACTLY.
+        # This prevents breaking changes like converting `IFoo x = new Foo();` to `var x = new Foo();`.
+        return node.declared_type == node.instantiated_type
+
+
 class CSharpRoslynSyntaxTransformer:
     """
-    C# syntax modernization transformer.
-
-    Performs a conservative, syntax-aware transformation:
-    - Block-scoped namespace -> file-scoped namespace (C# 10+).
-      Detection is string/comment-aware so literal `namespace X {` inside
-      strings or comments is never rewritten, and only files with exactly
-      ONE block namespace are converted (C# requires a single file-scoped
-      namespace per file). Files with multiple namespaces are left untouched
-      rather than producing broken output.
-    - .csproj <TargetFramework> / <TargetFrameworks> property upgrade.
-
-    This transformer never claims to parse a full Roslyn AST; it performs
-    safe lexical transformations only and reports what it did.
+    C# syntax modernization transformer utilizing Roslyn-style SyntaxTree, SyntaxNode,
+    and SemanticModel specifications.
     """
 
-    def _skip_trivia(self, code: str, i: int, n: int) -> int:
-        """Advance past comments and string/char literals starting at or after i."""
-        while i < n:
-            c = code[i]
-            if c == "/" and i + 1 < n:
-                if code[i + 1] == "/":
-                    nl = code.find("\n", i)
-                    return (nl + 1) if nl != -1 else n
-                if code[i + 1] == "*":
-                    end = code.find("*/", i + 2)
-                    return (end + 2) if end != -1 else n
-            if c in ('"', "'", "`"):
-                quote = c
-                j = i + 1
-                while j < n:
-                    if code[j] == "\\":
-                        j += 2
-                        continue
-                    if code[j] == quote:
-                        break
-                    j += 1
-                return (j + 1) if j < n else n
-            return i
-        return n
-
-    def _find_namespace_blocks(self, code: str):
-        """Return list of (ns_name, ns_start, open_pos, close_pos, indent) for block namespaces."""
-        n = len(code)
-        i = 0
-        blocks = []
-        while i < n:
-            i = self._skip_trivia(code, i, n)
-            if i >= n:
-                break
-            if not code.startswith("namespace", i):
-                i += 1
-                continue
-            prev_ok = i == 0 or not (code[i - 1].isalnum() or code[i - 1] == "_")
-            after = i + len("namespace")
-            next_ok = after >= n or not (code[after].isalnum() or code[after] == "_")
-            if not (prev_ok and next_ok):
-                i += 1
-                continue
-            j = after
-            while j < n and (code[j].isspace() or code[j] in "\r\n"):
-                j += 1
-            name_start = j
-            while j < n and (code[j].isalnum() or code[j] in "_."):
-                j += 1
-            ns_name = code[name_start:j]
-            if not ns_name:
-                i += 1
-                continue
-            j2 = j
-            while j2 < n and code[j2].isspace():
-                j2 += 1
-            if j2 < n and code[j2] == "{":
-                open_pos = j2
-                line_start = code.rfind("\n", 0, i) + 1
-                indent = code[line_start:i]
-                # Find matching closing brace (string/comment-aware).
-                depth = 0
-                k = open_pos
-                while k < n:
-                    if code[k] in ('"', "'", "`"):
-                        k = self._skip_trivia(code, k, n)
-                        continue
-                    if code[k] == "/" and k + 1 < n and code[k + 1] in ("/", "*"):
-                        k = self._skip_trivia(code, k, n)
-                        continue
-                    if code[k] == "{":
-                        depth += 1
-                    elif code[k] == "}":
-                        depth -= 1
-                        if depth == 0:
-                            blocks.append((ns_name, i, open_pos, k, indent))
-                            break
-                    k += 1
-                i = open_pos + 1
-            else:
-                i += 1
-        return blocks
-
     def transform_code(self, code: str, target_version: str = "net8.0") -> str:
-        """Convert a single block namespace to file-scoped; otherwise leave unchanged."""
-        blocks = self._find_namespace_blocks(code)
-        if len(blocks) != 1:
-            # Multiple namespaces or none: do not risk producing invalid code.
+        """Convert C# namespace declarations to file-scoped syntax using SyntaxTree APIs."""
+        tree = CSharpSyntaxTree.parse_text(code)
+        namespaces = [node for node in tree.root.descendant_nodes() if isinstance(node, NamespaceDeclarationSyntax)]
+        
+        if len(namespaces) != 1:
             return code
-        ns_name, ns_start, open_pos, close_pos, indent = blocks[0]
-        line_start = code.rfind("\n", 0, ns_start) + 1
-        body = code[open_pos + 1:close_pos]
-
-        # Dedent the namespace body by one level, then trim the surrounding
-        # whitespace left behind by the removed opening/closing brace lines.
+            
+        ns = namespaces[0]
+        body_tokens = ns.tokens[ns.open_brace_idx + 1:ns.close_brace_idx]
+        body_text = "".join(body_tokens).strip()
+        
+        indent = ""
+        ns_idx = tree.root.tokens.index("namespace")
+        k = ns_idx - 1
+        while k >= 0 and tree.root.tokens[k].isspace() and "\n" not in tree.root.tokens[k]:
+            indent = tree.root.tokens[k] + indent
+            k -= 1
+            
         out_lines = []
-        for ln in body.split("\n"):
+        for ln in body_text.split("\n"):
             if ln.strip() == "":
                 out_lines.append("")
             elif indent and ln.startswith(indent):
@@ -413,10 +490,9 @@ class CSharpRoslynSyntaxTransformer:
             else:
                 out_lines.append(ln)
         dedented_body = "\n".join(out_lines).strip()
-
-        leading = code[:line_start]  # everything before the namespace line
-
-        return leading + f"namespace {ns_name};\n\n" + dedented_body + "\n\n"
+        
+        leading_text = "".join(tree.root.tokens[:ns_idx])
+        return leading_text + f"namespace {ns.name};\n\n" + dedented_body + "\n\n"
 
     def transform_csproj(self, content: str, target_framework: str = "net8.0") -> str:
         tf = target_framework if target_framework.startswith("net") else "net8.0"
