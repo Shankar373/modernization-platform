@@ -503,16 +503,12 @@ class PythonRuffAdapter(MigrationAdapter):
                 pass
         return snapshot
 
-    def _find_ruff(self, workspace_path: str) -> str:
-        """Prefer running backend virtualenv's ruff, then workspace .venv, then PATH.
-
-        On Windows, subprocess.run raises [WinError 2] if the executable is not found.
-        We resolve the full path before calling subprocess so it fails clearly.
-        """
-        import sys
+    def _resolve_ruff(self, workspace_path: str | None = None) -> str | None:
+        """Locate a usable ruff binary. Returns None when no ruff is available."""
         import shutil as _shutil
+        import sys
 
-        # 1. Check running backend virtual environment (where ruff is installed via requirements.txt)
+        # 1. Running backend virtual environment (where ruff is installed via requirements.txt)
         py_bin_dir = Path(sys.executable).parent
         for candidate in [
             py_bin_dir / "ruff.exe",
@@ -521,26 +517,53 @@ class PythonRuffAdapter(MigrationAdapter):
             if candidate.exists():
                 return str(candidate)
 
-        ws = Path(workspace_path)
-        # 2. Walk up from workspace to find a .venv with ruff
-        for candidate in [
-            ws / ".venv" / "Scripts" / "ruff.exe",
-            ws / ".venv" / "bin" / "ruff",
-            ws.parent / ".venv" / "Scripts" / "ruff.exe",
-            ws.parent / ".venv" / "bin" / "ruff",
-        ]:
-            if candidate.exists():
-                return str(candidate)
+        # 2. Project venv locations — preferred over the global PATH lookup below
+        if workspace_path:
+            ws = Path(workspace_path)
+            for candidate in [
+                ws / ".venv" / "Scripts" / "ruff.exe",
+                ws / ".venv" / "bin" / "ruff",
+                ws.parent / ".venv" / "Scripts" / "ruff.exe",
+                ws.parent / ".venv" / "bin" / "ruff",
+            ]:
+                if candidate.exists():
+                    return str(candidate)
 
         # 3. System PATH lookup — shutil.which returns full path or None
         sys_ruff = _shutil.which("ruff")
         if sys_ruff:
             return sys_ruff
 
-        # 4. Not found anywhere — raise clearly so warning is meaningful
+        return None
+
+    def _find_ruff(self, workspace_path: str) -> str:
+        """Same resolution as _resolve_ruff, but raises when no ruff binary exists.
+
+        On Windows, subprocess.run raises [WinError 2] if the executable is not found.
+        We resolve the full path before calling subprocess so it fails clearly.
+        """
+        resolved = self._resolve_ruff(workspace_path)
+        if resolved:
+            return resolved
         raise FileNotFoundError(
             "ruff not found. Install with: pip install ruff"
         )
+
+    def check_environment_readiness(self, workspace_path: str | None = None) -> dict:
+        """Detect ruff in the project virtualenv (Windows and Unix) before global PATH."""
+        import shutil
+        missing = []
+        if shutil.which("python") is None:
+            missing.append("python")
+        if self._resolve_ruff(workspace_path) is None:
+            missing.append("ruff")
+        return {
+            "ready": len(missing) == 0,
+            "missing_tools": missing,
+            "required_tools": list(self.required_tools),
+            "engine": self.engine,
+            "maturity": self.maturity,
+        }
 
 
     def _compute_diffs(self, before: dict, after: dict) -> List[FileChangeMetadata]:

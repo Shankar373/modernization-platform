@@ -622,8 +622,6 @@ class CSharpRoslynAdapter(MigrationAdapter):
             files_modified=len(modified_files),
             files_unchanged=total_scanned - len(modified_files),
             capabilities_run=len(plan.steps),
-            build_passed=True,
-            tests_passed=True,
         )
         return MigrationResult(
             result_id=f"roslyn-res-{os.urandom(4).hex()}",
