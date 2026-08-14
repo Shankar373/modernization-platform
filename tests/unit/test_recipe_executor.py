@@ -153,3 +153,62 @@ def test_ts_strict_mode_reports_real_diff(ws: Path):
     cf = res.changed_files[0]
     assert cf.before_content != cf.after_content
     assert '"strict": true' in cf.after_content
+
+
+# ── C# / .NET Roslyn recipe (cs-net6-upgrade) ─────────────────────────────────
+
+_CS_PROGRAM = """namespace LegacyApp
+{
+    public class Program
+    {
+        public static void Main() { }
+    }
+}
+"""
+
+
+_NET4_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+  </PropertyGroup>
+</Project>
+"""
+
+
+def test_csharp_recipe_invokes_adapter_and_rewrites_files(ws: Path):
+    (ws / "Program.cs").write_text(_CS_PROGRAM, encoding="utf-8")
+    (ws / "LegacyApp.csproj").write_text(_NET4_CSPROJ, encoding="utf-8")
+
+    res = run_recipe("cs-net6-upgrade", "net6-upgrade", str(ws), dry_run=False)
+
+    assert res.status == "EXECUTED"
+    files = {c.file for c in res.changed_files}
+    assert "Program.cs" in files
+    assert "LegacyApp.csproj" in files
+    # Real transformation applied on disk via the Roslyn adapter.
+    assert "namespace LegacyApp;" in (ws / "Program.cs").read_text(encoding="utf-8")
+    assert "<TargetFramework>net8.0</TargetFramework>" in (ws / "LegacyApp.csproj").read_text(encoding="utf-8")
+    # Honest validation reporting.
+    assert any("Validation: build_passed" in n for n in res.notes)
+
+
+def test_csharp_recipe_dry_run_does_not_write(ws: Path):
+    (ws / "Program.cs").write_text(_CS_PROGRAM, encoding="utf-8")
+
+    res = run_recipe("cs-net6-upgrade", "net6-upgrade", str(ws), dry_run=True)
+
+    assert res.status == "EXECUTED"
+    assert len(res.changed_files) == 1
+    # Dry run must not modify the file.
+    assert "namespace LegacyApp;" not in (ws / "Program.cs").read_text(encoding="utf-8")
+
+
+def test_csharp_recipe_not_applicable_when_nothing_to_change(ws: Path):
+    # File-scoped namespace (C# 10+) and net8.0 csproj — nothing to transform.
+    (ws / "Program.cs").write_text("namespace Mod;\n", encoding="utf-8")
+    (ws / "Mod.csproj").write_text(
+        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>\n',
+        encoding="utf-8")
+    res = run_recipe("cs-net6-upgrade", "net6-upgrade", str(ws), dry_run=True)
+    assert res.status == "NOT_APPLICABLE"

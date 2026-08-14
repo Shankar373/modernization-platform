@@ -617,5 +617,82 @@ def _py_f_strings_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     return res
 
 
+# ── Handlers: C# / .NET (Roslyn) ───────────────────────────────────────────────
+
+def _csharp_adapter_and_plan(ws: Path):
+    """Instantiate the C# Roslyn adapter and build a .NET 8 target migration plan."""
+    from app.adapters.base import CSharpRoslynAdapter
+    from app.core.domain.models import TechnologyProfile
+    adapter = CSharpRoslynAdapter()
+    plan = adapter.create_plan(str(ws), TechnologyProfile(), target_version="net8.0")
+    return adapter, plan
+
+
+@register("cs-net6-upgrade")
+def _cs_net6_upgrade(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Invoke the CSharpRoslynAdapter to migrate .NET Framework projects to .NET 6/8.
+
+    Apply mode runs the adapter's real transformation (file-scoped namespaces +
+    <TargetFramework> upgrade) and reports build/validation results from the
+    adapter's post-migration validation — never fabricating success.
+    """
+    res = RecipeExecutionResult(
+        recipe_id="cs-net6-upgrade",
+        recipe_name=".NET Framework → .NET 6/8 Upgrade",
+    )
+    from app.adapters.base import CSharpRoslynSyntaxTransformer
+    adapter, plan = _csharp_adapter_and_plan(ws)
+    target_version = plan.targets[0].target_version if plan.targets else "net8.0"
+
+    if dry_run:
+        preview = adapter.dry_run(str(ws), plan)
+        if preview.notes:
+            res.notes.append(preview.notes)
+        # Accurate in-memory preview of the transformations (no files written).
+        transformer = CSharpRoslynSyntaxTransformer()
+        applied = 0
+        for f in _iter_files(ws, suffixes={".cs", ".csproj"}):
+            orig = f.read_text(encoding="utf-8", errors="replace")
+            if f.suffix.lower() == ".csproj":
+                new = transformer.transform_csproj(orig, target_version)
+                desc = "Preview: TargetFramework upgrade (dry run)."
+            else:
+                new = transformer.transform_code(orig, target_version)
+                desc = "Preview: file-scoped namespace conversion (dry run)."
+            if new != orig:
+                applied += 1
+                res.changed_files.append(_build_change(
+                    str(f.relative_to(ws)), orig, new, "roslyn-net6-upgrade",
+                    "CS_NET6_UPGRADE", desc))
+        if applied:
+            res.notes.append(f"Dry run: {applied} file(s) would change.")
+        else:
+            res.status = "NOT_APPLICABLE"
+            res.notes.append("No C# files require transformation (already file-scoped / net8.0).")
+        return res
+
+    result = adapter.migrate(str(ws), plan)
+    for fm in result.changed_files:
+        res.changed_files.append(fm)
+
+    if not res.changed_files:
+        res.status = "NOT_APPLICABLE"
+        res.notes.append("No C# files required transformation (already file-scoped / net8.0).")
+        return res
+
+    validation = adapter.validate(str(ws), result)
+    res.notes.extend(validation.warnings)
+    res.notes.append(
+        f"Validation: build_passed={validation.build_passed}, "
+        f"tests_passed={validation.tests_passed} ({validation.tests_total} test(s)), "
+        f"warnings={len(validation.warnings)}."
+    )
+    if not validation.build_passed:
+        res.status = "FAILED"
+        res.success = False
+        res.errors.extend(validation.errors)
+    return res
+
+
 def get_executor_help() -> list[str]:
     return sorted(_REGISTRY.keys())

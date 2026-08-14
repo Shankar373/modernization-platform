@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Tuple
 
@@ -90,6 +91,79 @@ def validate_package_json(file_path: str) -> Tuple[ValidationStatus, List[str]]:
     return ValidationStatus.PASSED, []
 
 
+def validate_packages_config(file_path: str) -> Tuple[ValidationStatus, List[str]]:
+    """Validate a packages.config file post-update (well-formed XML, each package has id + version)."""
+    errors: List[str] = []
+    path = Path(file_path)
+
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return ValidationStatus.FAILED, [f"Cannot read file: {e}"]
+
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as e:
+        return ValidationStatus.FAILED, [f"Invalid XML: {e}"]
+
+    if root.tag.lower() != "packages":
+        return ValidationStatus.FAILED, [f"Unexpected root element: <{root.tag}> (expected <packages>)"]
+
+    ids_seen: set[str] = set()
+    for pkg in root:
+        if pkg.tag.lower() != "package":
+            continue
+        pid = pkg.get("id", "").strip()
+        version = pkg.get("version", "").strip()
+        if not pid:
+            errors.append("package entry missing required 'id' attribute")
+        else:
+            if pid.lower() in ids_seen:
+                errors.append(f"duplicate package '{pid}'")
+            ids_seen.add(pid.lower())
+        if not version:
+            errors.append(f"package '{pid}': missing required 'version' attribute")
+
+    if errors:
+        return ValidationStatus.FAILED, errors
+    return ValidationStatus.PASSED, []
+
+
+def validate_csproj(file_path: str) -> Tuple[ValidationStatus, List[str]]:
+    """Validate a .csproj file post-update (well-formed XML, PackageReference entries carry versions)."""
+    errors: List[str] = []
+    path = Path(file_path)
+
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return ValidationStatus.FAILED, [f"Cannot read file: {e}"]
+
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as e:
+        return ValidationStatus.FAILED, [f"Invalid XML: {e}"]
+
+    refs_seen: set[str] = set()
+    for ref in root.iter():
+        if ref.tag.lower() == "packagereference":
+            pid = ref.get("Include", "").strip()
+            if not ref.get("Version", "").strip():
+                errors.append(f"PackageReference '{pid}': missing required 'Version' attribute")
+            if pid and pid.lower() in refs_seen:
+                errors.append(f"duplicate PackageReference '{pid}'")
+            if pid:
+                refs_seen.add(pid.lower())
+        elif ref.tag.lower() == "reference":
+            # Legacy <Reference Include="..."> with <HintPath> is valid without a Version attribute
+            if not ref.get("Include", "").strip():
+                errors.append("reference entry missing required 'Include' attribute")
+
+    if errors:
+        return ValidationStatus.FAILED, errors
+    return ValidationStatus.PASSED, []
+
+
 def validate_file(file_path: str) -> Tuple[ValidationStatus, List[str]]:
     """Dispatch to the right validator based on filename."""
     name = Path(file_path).name.lower()
@@ -98,5 +172,9 @@ def validate_file(file_path: str) -> Tuple[ValidationStatus, List[str]]:
         return validate_requirements_txt(file_path)
     if name == "package.json":
         return validate_package_json(file_path)
+    if name == "packages.config":
+        return validate_packages_config(file_path)
+    if name.endswith(".csproj"):
+        return validate_csproj(file_path)
     # No validator for this file type — skip
     return ValidationStatus.SKIPPED, []

@@ -503,14 +503,25 @@ async def recommend_recipes(req: RecommendRequest):
     from app.capabilities.registry import registry
     from app.core.domain.models import CapabilityStatus
 
+    # Only recommend recipes whose language is part of the detected project
+    # profile (plus generic language-agnostic recipes). This prevents, e.g.,
+    # Python/Java/JS recipes from being recommended for a C# workspace.
+    detected_langs = {l.strip().lower() for l in req.languages if l and l.strip()}
+
     scored: List[Dict] = []
     for recipe in RECIPE_CATALOG:
         is_applicable = _is_version_compatible(recipe, req.source_version, req.target_version)
         if not is_applicable:
             continue
 
+        lang = recipe.get("language") or "all"
+        # Language-specific recipes require a matching detected language. If no
+        # languages were detected at all, only generic (language="all") recipes
+        # are eligible — nothing specific to an untargeted language is surfaced.
+        if lang != "all" and lang not in detected_langs:
+            continue
+
         # Check tool availability for this language in registry
-        lang = recipe.get("language")
         is_tool_available = True
         if lang and lang != "all":
             caps = registry.get_for_language(lang)
@@ -538,6 +549,10 @@ async def recommend_recipes(req: RecommendRequest):
     reasoning_parts = []
     if req.languages:
         reasoning_parts.append(f"Detected languages: {', '.join(req.languages)}.")
+        if detected_langs:
+            reasoning_parts.append(
+                f"Recommendations restricted to recipes targeting {', '.join(sorted(detected_langs))} or generic recipes."
+            )
     if req.frameworks:
         reasoning_parts.append(f"Detected frameworks: {', '.join(req.frameworks)}.")
     if not req.has_ci:

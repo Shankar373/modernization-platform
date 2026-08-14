@@ -811,4 +811,84 @@ class TestEndToEnd:
         assert 'Include="AForge.Imaging, Version=2.2.6.0"' in csproj_content
         assert 'packages\\AForge.Imaging.2.2.6\\lib' in csproj_content
 
+    def test_valid_packages_config_passes_validation(self, tmp_path):
+        from app.dependency_analysis.validator import validate_file, validate_packages_config
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "packages.config"
+        f.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<packages>
+  <package id="AForge" version="2.2.6" targetFramework="net452" />
+</packages>""", encoding="utf-8")
+
+        status, errors = validate_packages_config(str(f))
+        assert status == ValidationStatus.PASSED
+        assert errors == []
+        # validate_file dispatch must not return SKIPPED for packages.config
+        status2, _ = validate_file(str(f))
+        assert status2 == ValidationStatus.PASSED
+
+    def test_invalid_packages_config_fails_validation(self, tmp_path):
+        from app.dependency_analysis.validator import validate_packages_config
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "packages.config"
+        # Duplicate id + missing version attribute
+        f.write_text("""<packages>
+  <package id="AForge" version="2.2.6" />
+  <package id="AForge" />
+  <package id="Other" />
+</packages>""", encoding="utf-8")
+
+        status, errors = validate_packages_config(str(f))
+        assert status == ValidationStatus.FAILED
+        assert any("duplicate package" in e for e in errors)
+        assert any("missing required 'version'" in e for e in errors)
+
+    def test_malformed_packages_config_fails_validation(self, tmp_path):
+        from app.dependency_analysis.validator import validate_packages_config
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "packages.config"
+        f.write_text("<packages><package id='AForge' version='2.2.6'", encoding="utf-8")
+        status, errors = validate_packages_config(str(f))
+        assert status == ValidationStatus.FAILED
+        assert any("XML" in e for e in errors)
+
+    def test_valid_csproj_passes_validation(self, tmp_path):
+        from app.dependency_analysis.validator import validate_file, validate_csproj
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "MyProj.csproj"
+        f.write_text("""<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="EntityFramework" Version="6.5.0" />
+    <Reference Include="AForge.Imaging, Version=2.2.6.0">
+      <HintPath>..\\packages\\AForge.Imaging.2.2.6\\lib\\AForge.Imaging.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        status, errors = validate_csproj(str(f))
+        assert status == ValidationStatus.PASSED
+        assert errors == []
+        # validate_file dispatch must not return SKIPPED for .csproj
+        status2, _ = validate_file(str(f))
+        assert status2 == ValidationStatus.PASSED
+
+    def test_csproj_missing_version_fails_validation(self, tmp_path):
+        from app.dependency_analysis.validator import validate_csproj
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "MyProj.csproj"
+        f.write_text("""<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" />
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        status, errors = validate_csproj(str(f))
+        assert status == ValidationStatus.FAILED
+        assert any("Version" in e for e in errors)
+
 
