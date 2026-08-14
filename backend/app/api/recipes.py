@@ -305,6 +305,7 @@ class RecommendRequest(BaseModel):
     has_ci: bool = False
     source_version: Optional[str] = None
     target_version: Optional[str] = None
+    target_languages: Optional[List[str]] = None
 
 
 class ConflictsRequest(BaseModel):
@@ -503,10 +504,40 @@ async def recommend_recipes(req: RecommendRequest):
     from app.capabilities.registry import registry
     from app.core.domain.models import CapabilityStatus
 
-    # Only recommend recipes whose language is part of the detected project
-    # profile (plus generic language-agnostic recipes). This prevents, e.g.,
-    # Python/Java/JS recipes from being recommended for a C# workspace.
-    detected_langs = {l.strip().lower() for l in req.languages if l and l.strip()}
+    def normalize_lang(l: str) -> str:
+        cleaned = l.strip().lower()
+        if cleaned in ("c#", "csharp", "vb.net", "f#"):
+            return "csharp"
+        if cleaned in ("js", "javascript", "node", "nodejs"):
+            return "javascript"
+        if cleaned in ("ts", "typescript"):
+            return "typescript"
+        return cleaned
+
+    detected_langs = {normalize_lang(l) for l in req.languages if l and l.strip()}
+    
+    actual_targets = set()
+    if req.target_languages:
+        actual_targets = {normalize_lang(l) for l in req.target_languages if l and l.strip()}
+    else:
+        is_csharp = "csharp" in detected_langs
+        is_java = "java" in detected_langs
+        is_python = "python" in detected_langs
+        
+        if is_csharp:
+            actual_targets.add("csharp")
+        elif is_java:
+            actual_targets.add("java")
+        elif is_python:
+            actual_targets.add("python")
+        else:
+            if "typescript" in detected_langs:
+                actual_targets.add("typescript")
+            if "javascript" in detected_langs:
+                actual_targets.add("javascript")
+            for lang in detected_langs:
+                if lang not in ("javascript", "typescript"):
+                    actual_targets.add(lang)
 
     scored: List[Dict] = []
     for recipe in RECIPE_CATALOG:
@@ -514,14 +545,10 @@ async def recommend_recipes(req: RecommendRequest):
         if not is_applicable:
             continue
 
-        lang = recipe.get("language") or "all"
-        # Language-specific recipes require a matching detected language. If no
-        # languages were detected at all, only generic (language="all") recipes
-        # are eligible — nothing specific to an untargeted language is surfaced.
-        if lang != "all" and lang not in detected_langs:
+        lang = normalize_lang(recipe.get("language") or "all")
+        if lang != "all" and lang not in actual_targets:
             continue
 
-        # Check tool availability for this language in registry
         is_tool_available = True
         if lang and lang != "all":
             caps = registry.get_for_language(lang)
@@ -549,9 +576,9 @@ async def recommend_recipes(req: RecommendRequest):
     reasoning_parts = []
     if req.languages:
         reasoning_parts.append(f"Detected languages: {', '.join(req.languages)}.")
-        if detected_langs:
+        if actual_targets:
             reasoning_parts.append(
-                f"Recommendations restricted to recipes targeting {', '.join(sorted(detected_langs))} or generic recipes."
+                f"Recommendations restricted to recipes targeting {', '.join(sorted(actual_targets))} or generic recipes."
             )
     if req.frameworks:
         reasoning_parts.append(f"Detected frameworks: {', '.join(req.frameworks)}.")

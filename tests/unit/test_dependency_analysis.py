@@ -892,3 +892,37 @@ class TestEndToEnd:
         assert any("Version" in e for e in errors)
 
 
+
+
+    def test_csproj_validation_namespaced_version_attr(self, tmp_path):
+        from app.dependency_analysis.validator import validate_csproj
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "NamespacedProj.csproj"
+        f.write_text('<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="15.0"><ItemGroup><PackageReference Include="EntityFramework" Version="6.4.4" /></ItemGroup></Project>', encoding="utf-8")
+
+        status, errors = validate_csproj(str(f))
+        assert status == ValidationStatus.PASSED
+        assert errors == []
+
+    def test_csproj_validation_nested_version_tag(self, tmp_path):
+        from app.dependency_analysis.validator import validate_csproj
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "NestedVersionProj.csproj"
+        f.write_text('<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003"><ItemGroup><PackageReference Include="Autofac.Mvc5"><Version>3.3.4</Version></PackageReference></ItemGroup></Project>', encoding="utf-8")
+
+        status, errors = validate_csproj(str(f))
+        assert status == ValidationStatus.PASSED
+        assert errors == []
+
+    def test_csproj_validation_case_insensitive_and_update(self, tmp_path):
+        from app.dependency_analysis.validator import validate_csproj
+        from app.dependency_analysis.models import ValidationStatus
+
+        f = tmp_path / "CaseInsensitiveProj.csproj"
+        f.write_text('<Project><ItemGroup><PackageReference Update="log4net" version="2.0.12" /></ItemGroup></Project>', encoding="utf-8")
+
+        status, errors = validate_csproj(str(f))
+        assert status == ValidationStatus.PASSED
+        assert errors == []

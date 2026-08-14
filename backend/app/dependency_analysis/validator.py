@@ -106,15 +106,24 @@ def validate_packages_config(file_path: str) -> Tuple[ValidationStatus, List[str
     except ET.ParseError as e:
         return ValidationStatus.FAILED, [f"Invalid XML: {e}"]
 
-    if root.tag.lower() != "packages":
+    root_tag = root.tag.split("}")[-1].lower()
+    if root_tag != "packages":
         return ValidationStatus.FAILED, [f"Unexpected root element: <{root.tag}> (expected <packages>)"]
 
     ids_seen: set[str] = set()
     for pkg in root:
-        if pkg.tag.lower() != "package":
+        pkg_tag = pkg.tag.split("}")[-1].lower()
+        if pkg_tag != "package":
             continue
-        pid = pkg.get("id", "").strip()
-        version = pkg.get("version", "").strip()
+        pid = ""
+        version = ""
+        for k, v in pkg.attrib.items():
+            k_local = k.split("}")[-1].lower()
+            if k_local == "id":
+                pid = v.strip()
+            elif k_local == "version":
+                version = v.strip()
+
         if not pid:
             errors.append("package entry missing required 'id' attribute")
         else:
@@ -146,17 +155,41 @@ def validate_csproj(file_path: str) -> Tuple[ValidationStatus, List[str]]:
 
     refs_seen: set[str] = set()
     for ref in root.iter():
-        if ref.tag.lower() == "packagereference":
-            pid = ref.get("Include", "").strip()
-            if not ref.get("Version", "").strip():
-                errors.append(f"PackageReference '{pid}': missing required 'Version' attribute")
+        ref_tag = ref.tag.split("}")[-1].lower()
+        if ref_tag == "packagereference":
+            pid = ""
+            version = ""
+            for k, v in ref.attrib.items():
+                k_local = k.split("}")[-1].lower()
+                if k_local in ("include", "update"):
+                    pid = v.strip()
+                elif k_local == "version":
+                    version = v.strip()
+
+            if not version:
+                for child in ref:
+                    child_tag = child.tag.split("}")[-1].lower()
+                    if child_tag == "version":
+                        if child.text:
+                            version = child.text.strip()
+                        break
+
+            if not version:
+                display_name = pid or "Unknown"
+                errors.append(f"PackageReference '{display_name}': missing required 'Version' attribute")
             if pid and pid.lower() in refs_seen:
                 errors.append(f"duplicate PackageReference '{pid}'")
             if pid:
                 refs_seen.add(pid.lower())
-        elif ref.tag.lower() == "reference":
+        elif ref_tag == "reference":
             # Legacy <Reference Include="..."> with <HintPath> is valid without a Version attribute
-            if not ref.get("Include", "").strip():
+            include_attr = ""
+            for k, v in ref.attrib.items():
+                k_local = k.split("}")[-1].lower()
+                if k_local == "include":
+                    include_attr = v.strip()
+                    break
+            if not include_attr:
                 errors.append("reference entry missing required 'Include' attribute")
 
     if errors:
