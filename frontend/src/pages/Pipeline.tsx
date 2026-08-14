@@ -83,9 +83,10 @@ const RISK_COLOR: Record<string, string> = {
 function Badge({ text, color }: { text: string; color: string }) {
   return (
     <span style={{
-      display: 'inline-block', padding: '2px 8px', borderRadius: 99,
+      display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 99,
       fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
       background: color + '22', color, border: `1px solid ${color}44`,
+      whiteSpace: 'nowrap', flexShrink: 0,
     }}>{text}</span>
   );
 }
@@ -468,9 +469,9 @@ function RecipeRow({ recipe, highlighted = false, selected, onToggle }: { recipe
           {selected && <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>✓</span>}
         </div>
       )}
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{recipe.name}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{recipe.name}</span>
           {highlighted && recipe.recommended && <Badge text="recommended" color="var(--color-accent)" />}
           <Badge text={recipe.category} color={CATEGORY_COLOR[recipe.category as keyof typeof CATEGORY_COLOR] || '#6366f1'} />
           <Badge text={recipe.complexity} color={COMPLEXITY_COLOR[recipe.complexity as keyof typeof COMPLEXITY_COLOR] || '#6366f1'} />
@@ -596,9 +597,9 @@ function RecipeAnalyzingStep({ analysis, onContinue }: { analysis: RecipeAnalysi
           <div key={phase.phase} style={{ marginBottom: 16 }}>
             <h4 style={{ fontSize: 12, color: 'var(--color-accent)', marginBottom: 8, textTransform: 'uppercase' }}>Phase {phase.phase}</h4>
             {phase.recipes.map(r => (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.04)', fontSize: 13 }}>
-                <span style={{ color: 'var(--color-accent)', fontSize: 10 }}>●</span>
-                <span style={{ fontWeight: 600 }}>{r.name}</span>
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.04)', fontSize: 13, flexWrap: 'wrap', minWidth: 0 }}>
+                <span style={{ color: 'var(--color-accent)', fontSize: 10, flexShrink: 0 }}>●</span>
+                <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                 <Badge text={r.category} color={CATEGORY_COLOR[r.category as keyof typeof CATEGORY_COLOR] || '#6366f1'} />
               </div>
             ))}
@@ -629,10 +630,24 @@ function ConflictResolutionStep({
   if (!analysis.has_conflicts) {
     return (
       <div className="animate-fade-up">
-        <div className="card" style={{ textAlign: 'center', padding: 48, marginBottom: 20 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+        <div className="card" style={{ textAlign: 'center', padding: '32px 48px', marginBottom: 20 }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
           <h3 style={{ marginBottom: 8 }}>No Conflicts Detected</h3>
-          <p className="text-muted">All selected recipes are compatible. Proceeding to plan generation.</p>
+          <p className="text-muted" style={{ marginBottom: 24 }}>All selected recipes passed executor verification and are compatible.</p>
+          {/* Executor-verified recipe summary table */}
+          <div style={{ textAlign: 'left', background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10, padding: '16px 20px' }}>
+            <p style={{ fontSize: 12, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.05em' }}>Executor-Verified Recipes ({analysis.ordered_recipes.length})</p>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {analysis.ordered_recipes.map((r, i) => (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, flexWrap: 'wrap' }}>
+                  <span style={{ color: '#10b981', fontWeight: 700, minWidth: 18 }}>{i + 1}.</span>
+                  <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                  <Badge text={r.category} color={CATEGORY_COLOR[r.category as keyof typeof CATEGORY_COLOR] || '#6366f1'} />
+                  <Badge text="✓ executable" color="#10b981" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
         <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
           <button className="btn btn-primary" onClick={onContinue}>
