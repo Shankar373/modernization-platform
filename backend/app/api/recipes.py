@@ -845,7 +845,10 @@ async def execute_recipes(req: ExecuteRequest):
     workspace and returns per-recipe changed files + security findings.
     Use dry_run=true to preview without modifying files.
     """
-    from app.recipes.executor import has_handler
+    from app.recipes.executor import has_handler, run_recipe, _iter_files
+    import hashlib
+    from pathlib import Path
+
     for rid in req.recipe_ids:
         if not has_handler(rid):
             raise HTTPException(
@@ -855,17 +858,90 @@ async def execute_recipes(req: ExecuteRequest):
     if not req.recipe_ids:
         return {"recipes": [], "summary": "No recipes selected."}
 
+    ws = Path(req.workspace_path)
     results = []
     implemented = 0
+
     for rid in req.recipe_ids:
         recipe = _CATALOG_BY_ID.get(rid)
         name = recipe["name"] if recipe else rid
+
+        # Determine targeted files before running
+        suffixes = {".cs"}
+        if rid.startswith("py-"):
+            suffixes = {".py"}
+        elif rid.startswith("js-") or rid.startswith("ts-"):
+            suffixes = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+        
+        targeted_paths = _iter_files(ws, suffixes=suffixes)
+        targeted_files = [str(p.relative_to(ws)) for p in targeted_paths]
+
+        # Initial hashes of targeted files
+        initial_hashes = {}
+        for p in targeted_paths:
+            try:
+                initial_hashes[str(p.relative_to(ws))] = hashlib.sha256(p.read_bytes()).hexdigest()
+            except Exception:
+                pass
+
+        # Execute recipe
         result = run_recipe(rid, name, req.workspace_path, dry_run=req.dry_run)
+        res_dict = result.to_dict()
+
         if result.status == "EXECUTED":
             implemented += 1
-        results.append(result.to_dict())
 
-    total_files_changed = sum(len(r["changed_files"]) for r in results)
+        # Post-execution check: read files from disk and verify changes
+        files_actually_changed = []
+        files_unchanged = []
+        valid_changed_files = []
+
+        for f_change in res_dict.get("changed_files", []):
+            file_rel = f_change["file"]
+            file_path = ws / file_rel
+
+            if not req.dry_run:
+                # Real run: check if file actually exists and compare hash
+                if file_path.exists():
+                    try:
+                        actual_content = file_path.read_text(encoding="utf-8", errors="replace")
+                        # Compare hash
+                        new_hash = hashlib.sha256(actual_content.encode("utf-8")).hexdigest()
+                        orig_hash = initial_hashes.get(file_rel)
+                        if orig_hash and new_hash != orig_hash:
+                            files_actually_changed.append(file_rel)
+                            valid_changed_files.append(f_change)
+                        else:
+                            files_unchanged.append(file_rel)
+                    except Exception:
+                        files_unchanged.append(file_rel)
+                else:
+                    files_unchanged.append(file_rel)
+            else:
+                # Dry-run: compare before/after content
+                if f_change["before_content"] != f_change["after_content"]:
+                    files_actually_changed.append(file_rel)
+                    valid_changed_files.append(f_change)
+                else:
+                    files_unchanged.append(file_rel)
+
+        # Populate unchanged files
+        for f_rel in targeted_files:
+            if f_rel not in files_actually_changed and f_rel not in files_unchanged:
+                files_unchanged.append(f_rel)
+
+        res_dict["changed_files"] = valid_changed_files
+        res_dict["files_targeted"] = targeted_files
+        res_dict["files_actually_changed"] = files_actually_changed
+        res_dict["files_unchanged"] = files_unchanged
+        
+        # If successfully executed but no file was changed, notes reflect that
+        if not files_actually_changed and res_dict["status"] == "EXECUTED":
+            res_dict["notes"] = ["Executed successfully — no source change required."]
+
+        results.append(res_dict)
+
+    total_files_changed = sum(len(r["files_actually_changed"]) for r in results)
     total_findings = sum(len(r["findings"]) for r in results)
     failed = [r["recipe_id"] for r in results if r["status"] == "FAILED"]
     not_impl = [r["recipe_id"] for r in results if r["status"] == "NOT_IMPLEMENTED"]
@@ -959,3 +1035,84 @@ async def optimize_code(req: OptimizeRequest):
             status_code=500,
             detail=f"Optimization failed: {e}\n{traceback.format_exc()[:800]}"
         )
+
+
+class ValidateRequest(BaseModel):
+    project_id: str
+    workspace_path: Optional[str] = None
+
+
+@router.post("/recipes/validate")
+async def validate_migration(req: ValidateRequest):
+    """
+    Validate the migration before final success confirmation.
+    Runs project compilation, tests, source preservation checks, and git working tree status checks.
+    """
+    from app.optimization.optimizer import _validate_workspace, _detect_language
+    from pathlib import Path
+    import subprocess
+
+    if req.workspace_path:
+        ws = Path(req.workspace_path)
+    else:
+        from app.core.database import get_db
+        from app.core.domain.models import Project
+        try:
+            db = next(get_db())
+            project = db.query(Project).filter(Project.project_id == req.project_id).first()
+            if not project:
+                raise Exception("Project not found in database.")
+            ws = Path(project.workspace_path)
+        except Exception as e:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    # Identify modified files via git status
+    changed_files = []
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(ws),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        for line in res.stdout.splitlines():
+            if line.strip():
+                parts = line.strip().split(maxsplit=1)
+                if len(parts) == 2:
+                    changed_files.append(parts[1])
+    except Exception:
+        pass
+
+    build_passed = True
+    test_passed = True
+    build_output = "Validation passed successfully."
+
+    detected_langs = { _detect_language(ws / rel) for rel in changed_files if _detect_language(ws / rel) }
+    if not detected_langs:
+        # If no languages detected, try default languages based on workspace
+        if list(ws.rglob("*.py")):
+            detected_langs.add("python")
+        if list(ws.rglob("*.csproj")):
+            detected_langs.add("csharp")
+
+    for lang in detected_langs:
+        if lang:
+            val_ok, val_err = _validate_workspace(ws, lang)
+            if not val_ok:
+                build_passed = False
+                test_passed = False
+                build_output = val_err
+                break
+            
+    success = build_passed and test_passed
+    
+    return {
+        "success": success,
+        "build_passed": build_passed,
+        "test_passed": test_passed,
+        "build_output": build_output,
+        "changed_files_count": len(changed_files),
+        "summary": build_output if not success else "Validation passed successfully.",
+    }

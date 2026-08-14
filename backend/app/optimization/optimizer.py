@@ -277,6 +277,7 @@ class OptimizationResult:
             "dry_run": self.dry_run,
             "files_scanned": self.files_scanned,
             "files_optimized": self.files_optimized,
+            "files_processed": self.files_optimized,
             "files_changed": self.files_changed,
             "files_unchanged": self.files_unchanged,
             "files_skipped": self.files_skipped,
@@ -506,13 +507,24 @@ def _validate_workspace(ws: Path, language: str) -> tuple[bool, str]:
 
         # Optional pytest run
         try:
+            import os
+            import sys
+            env = os.environ.copy()
+            workspace_str = str(ws)
+            existing_pythonpath = env.get("PYTHONPATH", "")
+            if existing_pythonpath:
+                env["PYTHONPATH"] = f"{workspace_str}{os.path.pathsep}{existing_pythonpath}"
+            else:
+                env["PYTHONPATH"] = workspace_str
+
             pytest_proc = subprocess.run(
-                ["pytest", "--tb=short", "-q", str(ws)],
-                capture_output=True, text=True, timeout=60, cwd=str(ws)
+                [sys.executable, "-m", "pytest", "--tb=short", "-q", workspace_str],
+                capture_output=True, text=True, timeout=60, cwd=workspace_str, env=env
             )
             if pytest_proc.returncode not in (0, 5):  # 5 = no tests collected
                 return False, f"pytest tests failed: {pytest_proc.stdout or pytest_proc.stderr}"
-        except Exception:
+        except Exception as e:
+            logger.warning(f"pytest check failed to execute: {e}")
             pass
         return True, "Python syntax and tests passed."
 

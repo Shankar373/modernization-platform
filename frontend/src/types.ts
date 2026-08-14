@@ -277,6 +277,7 @@ export interface OptimizationResult {
   dry_run: boolean;
   files_scanned: number;
   files_optimized: number;
+  files_processed?: number;
   files_changed: number;
   files_unchanged: number;
   files_skipped: number;

@@ -219,3 +219,6 @@ export const optimizeCode = (data: {
   recipe_ids?: string[];
   dry_run?: boolean;
 }) => API.post('/recipes/optimize', data);
+
+export const validateMigration = (workspacePath: string, projectId: string) =>
+  API.post('/recipes/validate', { workspace_path: workspacePath, project_id: projectId });

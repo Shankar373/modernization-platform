@@ -1,3 +1,5 @@
+// @ts-ignore
+process.env.DEBUG_PRINT_LIMIT = '1000000';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Pipeline from '../pages/Pipeline';
@@ -103,7 +105,41 @@ vi.mock('../api/client', () => {
     getLlmStatus: vi.fn().mockImplementation(() => Promise.resolve({ data: { provider: 'groq', model: 'llama-3.3-70b-versatile', llm_available: true } })),
     analyzeRecipeConflicts: vi.fn().mockImplementation(() => Promise.resolve({ data: innerRecipeAnalysis })),
     generateMigrationPlan: vi.fn().mockImplementation(() => Promise.resolve({ data: innerMigrationPlan })),
-    executeRecipes: vi.fn().mockImplementation(() => Promise.resolve({ data: { recipes_executed: 1, files_changed: 1, findings_count: 0 } })),
+    executeRecipes: vi.fn().mockImplementation(() => Promise.resolve({
+      data: {
+        recipes_executed: 1,
+        files_changed: 1,
+        findings_count: 0,
+        recipes: [
+          {
+            recipe_id: 'cs-file-scoped-namespace',
+            recipe_name: 'Convert namespace to file-scoped',
+            status: 'EXECUTED',
+            files_targeted: ['src/LegacyFilter.cs'],
+            files_actually_changed: ['src/LegacyFilter.cs'],
+            files_unchanged: [],
+            changed_files: [
+              {
+                file: 'src/LegacyFilter.cs',
+                diff: '@@ -1 +1 @@\n-class X {}\n+class X {}',
+              }
+            ],
+            notes: ['Applied conversion successfully.'],
+            findings: [],
+          }
+        ]
+      }
+    })),
+    validateMigration: vi.fn().mockImplementation(() => Promise.resolve({
+      data: {
+        success: true,
+        build_passed: true,
+        test_passed: true,
+        build_output: 'Build succeeded',
+        changed_files_count: 1,
+        summary: 'Validation passed successfully.',
+      }
+    })),
     createGitCheckpoint: vi.fn().mockImplementation(() => Promise.resolve({ data: { status: 'success', commit_hash: '123456', branch: 'master', files_committed: 1, timestamp: new Date().toISOString() } })),
     optimizeCode: vi.fn().mockImplementation(() => Promise.resolve({
       data: {
@@ -239,16 +275,34 @@ describe('Pipeline Multi-Step Wizard', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Create Git Checkpoint/ }));
 
-    // 12. Wait for automatic transition through checkpointing -> executing -> optimizing -> changed-files
+    // 12. Wait for transition to Verify Recipe Changes stage (after checkpoint & execution)
     await waitFor(() => {
-      expect(screen.getByText(/Changed Files & Before\/After Diff/)).toBeInTheDocument();
-      expect(screen.getByText('src/LegacyFilter.cs')).toBeInTheDocument();
+      expect(screen.getAllByText('Verify Recipe Changes').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('src/LegacyFilter.cs').length).toBeGreaterThan(0);
     }, { timeout: 12000 });
 
-    // 13. Finish Migration to go to the final Git Checkpoint results screen
+    // 13. Click Continue to go to Cleanup & Optimization
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Code Cleanup & Optimization/ }));
+
+    // 14. Wait for transition to Changed Files stage (after optimizing)
+    await waitFor(() => {
+      expect(screen.getByText(/Changed Files & Before\/After Diff/)).toBeInTheDocument();
+      expect(screen.getAllByText('src/LegacyFilter.cs').length).toBeGreaterThan(0);
+    }, { timeout: 8000 });
+
+    // 15. Proceed to Final Validation
+    fireEvent.click(screen.getByRole('button', { name: /Proceed to Final Validation/ }));
+
+    // 16. Wait for transition to Final Validation complete screen
+    await waitFor(() => {
+      expect(screen.getByText('Migration Completed Successfully')).toBeInTheDocument();
+      expect(screen.getByText('Build Compilation')).toBeInTheDocument();
+    }, { timeout: 8000 });
+
+    // 17. Finish Migration to go to the final Git Checkpoint done screen
     fireEvent.click(screen.getByRole('button', { name: /Finish Migration/ }));
 
-    // 14. Verify final complete Git Checkpoint screen
+    // 18. Verify final complete Git Checkpoint done screen
     await waitFor(() => {
       expect(screen.getByText('Git Checkpoint Created')).toBeInTheDocument();
       expect(screen.getByText('123456')).toBeInTheDocument();

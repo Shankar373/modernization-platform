@@ -85,44 +85,68 @@ docker compose up -d db redis
 ```
 
 ### 2. Backend Setup & Database Migrations
-```bash
+Always run these commands inside the `backend` folder, and ensure the Python Virtual Environment `.venv` is active (or prefix commands with `.venv\Scripts\`):
+
+**On Windows (PowerShell):**
+```powershell
 cd backend
 
-# Create & activate virtual environment
+# Create virtual environment (if not already done)
 python -m venv .venv
-.venv\Scripts\activate      # On Windows (or source .venv/bin/activate on Linux)
 
-# Install dependencies
+# Activate virtual environment (Crucial to avoid ModuleNotFound errors)
+.venv\Scripts\activate
+
+# Install dependencies inside the virtual environment
 pip install -r requirements.txt
 
 # Run PostgreSQL database migrations
 alembic upgrade head
 
-# Start FastAPI server (with 1GB upload limit)
-$env:MAX_UPLOAD_SIZE_MB="1024"
-python -m uvicorn app.main:app --port 8000 --host 0.0.0.0 --reload
+# Start FastAPI server 
+python -m uvicorn app.main:app --port 8000 --host 0.0.0.0
 ```
 
+**On Linux/macOS:**
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+python -m uvicorn app.main:app --port 8000 --host 0.0.0.0 
+```
 
 ### 3. Start Celery Background Worker
-In a new terminal:
-```bash
+Open a **new terminal** and run Celery using the virtual environment inside the `backend` folder:
+
+**On Windows (PowerShell):**
+```powershell
 cd backend
 .venv\Scripts\activate
 
-# Run Celery with solo pool (required on Windows)
+# Run Celery with solo pool (required on Windows to avoid process locks)
 celery -A app.workers.celery_app worker --loglevel=info --pool=solo
 ```
 
+**On Linux/macOS:**
+```bash
+cd backend
+source .venv/bin/activate
+celery -A app.workers.celery_app worker --loglevel=info
+```
+
 ### 4. Frontend Setup
-In a new terminal:
+Open a **new terminal** and run Vite dev server inside the `frontend` folder:
+*(Note: Start the FastAPI backend server first so Vite API proxies do not fail with ECONNREFUSED).*
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` in your browser to access the platform UI!
+Open the printed URL (e.g. `http://localhost:3000` or `http://localhost:3002`) in your browser to access the platform UI!
 
 ---
 
