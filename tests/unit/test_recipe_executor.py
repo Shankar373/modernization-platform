@@ -260,3 +260,135 @@ def test_cs_unsupported_recipes_are_not_implemented(ws: Path):
     for recipe_id in ["cs-sdk-project", "cs-pattern-matching", "cs-switch-expression", "cs-obsolete-api", "cs-global-usings", "cs-collection-expressions", "cs-api-compatibility", "cs-security-modernization"]:
         res = run_recipe(recipe_id, "unsupported", str(ws))
         assert res.status == "NOT_IMPLEMENTED"
+
+
+def test_cs_var_modernization_safety(ws: Path):
+    # Safe case: type on left matches type on right
+    (ws / "Program.cs").write_text("class P { void M() { Program p = new Program(); } }", encoding="utf-8")
+    res = run_recipe("cs-var-modernization", "var", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    assert "var p = new Program();" in (ws / "Program.cs").read_text(encoding="utf-8")
+
+    # Unsafe case: interface/base class on left, derived on right -> must NOT be transformed
+    (ws / "Unsafe.cs").write_text("class P { void M() { IProgram p = new Program(); } }", encoding="utf-8")
+    res2 = run_recipe("cs-var-modernization", "var", str(ws), dry_run=False)
+    assert res2.status == "NOT_APPLICABLE"
+    assert "IProgram p = new Program();" in (ws / "Unsafe.cs").read_text(encoding="utf-8")
+
+
+def test_cs_file_scoped_namespace_preserves_everything(ws: Path):
+    # Namespace block containing attributes, using directives, nested classes, and comments
+    code = """using System;
+// File-level header comment
+namespace App.Main
+{
+    /// <summary>
+    /// Program description
+    /// </summary>
+    [Serializable]
+    public class Program
+    {
+        public static void Main()
+        {
+            Console.WriteLine("Hello");
+        }
+
+        public class NestedClass
+        {
+            public int x;
+        }
+    }
+}
+"""
+    (ws / "Program.cs").write_text(code, encoding="utf-8")
+    res = run_recipe("cs-file-scoped-namespace", "ns", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    
+    final_code = (ws / "Program.cs").read_text(encoding="utf-8")
+    assert "using System;" in final_code
+    assert "// File-level header comment" in final_code
+    assert "namespace App.Main;" in final_code
+    assert "/// <summary>" in final_code
+    assert "[Serializable]" in final_code
+    assert "public class Program" in final_code
+    assert "public class NestedClass" in final_code
+
+
+def test_cs_package_reference_rollback_on_failed_validation(ws: Path):
+    # Setup packages.config and .csproj
+    (ws / "packages.config").write_text('<packages><package id="log4net" version="2.0.12" /></packages>', encoding="utf-8")
+    # Write a valid csproj
+    (ws / "Legacy.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><Reference Include="log4net"><HintPath>..\\packages\\log4net.2.0.12\\lib\\net45\\log4net.dll</HintPath></Reference></ItemGroup></Project>', encoding="utf-8")
+    # Write an invalid C# file (unbalanced braces) to fail validation
+    (ws / "Program.cs").write_text("class Program {", encoding="utf-8")
+    
+    res = run_recipe("cs-package-reference", "pkg-ref", str(ws), dry_run=False)
+    # Validation will fail because Program.cs has unbalanced braces
+    assert res.status == "FAILED"
+    # Verify packages.config was NOT deleted
+    assert (ws / "packages.config").exists()
+    # Verify Legacy.csproj was restored to its original state (not modified)
+    assert "log4net.dll" in (ws / "Legacy.csproj").read_text(encoding="utf-8")
+
+
+def test_csharp_recipe_engine_e2e(ws: Path):
+    csproj_content = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="log4net">
+      <HintPath>..\\packages\\log4net.2.0.12\\lib\\net45\\log4net.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>"""
+
+    cs_content = """using System;
+// Test header comment
+namespace LegacyApp
+{
+    public class Program
+    {
+        public static void Main()
+        {
+            Program p = new Program();
+            Console.WriteLine("Hello");
+        }
+    }
+}"""
+
+    packages_config_content = """<packages>
+  <package id="log4net" version="2.0.12" targetFramework="net48" />
+</packages>"""
+
+    (ws / "Legacy.csproj").write_text(csproj_content, encoding="utf-8")
+    (ws / "Program.cs").write_text(cs_content, encoding="utf-8")
+    (ws / "packages.config").write_text(packages_config_content, encoding="utf-8")
+
+    # 1. Run cs-net8-upgrade
+    res = run_recipe("cs-net8-upgrade", "net8", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    assert "<TargetFramework>net8.0</TargetFramework>" in (ws / "Legacy.csproj").read_text(encoding="utf-8")
+
+    # 2. Run cs-nullable-ref
+    res2 = run_recipe("cs-nullable-ref", "nullable", str(ws), dry_run=False)
+    assert res2.status == "EXECUTED"
+    assert "<Nullable>enable</Nullable>" in (ws / "Legacy.csproj").read_text(encoding="utf-8")
+
+    # 3. Run cs-package-reference
+    res3 = run_recipe("cs-package-reference", "pkg-ref", str(ws), dry_run=False)
+    assert res3.status == "EXECUTED"
+    assert not (ws / "packages.config").exists()
+
+    # 4. Run cs-file-scoped-namespace
+    res4 = run_recipe("cs-file-scoped-namespace", "file-scoped-ns", str(ws), dry_run=False)
+    assert res4.status == "EXECUTED"
+    cs_txt = (ws / "Program.cs").read_text(encoding="utf-8")
+    assert "namespace LegacyApp;" in cs_txt
+    assert "// Test header comment" in cs_txt
+
+    # 5. Run cs-var-modernization
+    res5 = run_recipe("cs-var-modernization", "var", str(ws), dry_run=False)
+    assert res5.status == "EXECUTED"
+    cs_txt2 = (ws / "Program.cs").read_text(encoding="utf-8")
+    assert "var p = new Program();" in cs_txt2

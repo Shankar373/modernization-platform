@@ -808,6 +808,7 @@ def _cs_package_reference(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         except Exception:
             pass
 
+    original_contents = {}
     for f in _iter_files(ws, suffixes={".csproj"}):
         orig = f.read_text(encoding="utf-8", errors="replace")
         try:
@@ -851,6 +852,7 @@ def _cs_package_reference(ws: Path, dry_run: bool) -> RecipeExecutionResult:
 
             if changed:
                 new = ET.tostring(root, encoding="utf-8").decode("utf-8")
+                original_contents[f] = orig
                 if not dry_run:
                     f.write_text(new, encoding="utf-8")
                 applied.append(_build_change(
@@ -860,24 +862,66 @@ def _cs_package_reference(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         except Exception:
             pass
 
-    if not dry_run:
-        for pc_file in packages_config_files:
-            if not is_ignored_path(pc_file):
-                try:
-                    pc_file.unlink()
-                    applied.append(FileChangeMetadata(
-                        file=str(pc_file.relative_to(ws)),
-                        status="DELETED",
-                        tools=["Roslyn"],
-                        before_content="<packages />",
-                        after_content="",
-                        diff="--- packages.config\n+++ /dev/null\n",
-                        changes=[{"type": "PACKAGES_CONFIG_DELETION", "description": "Deleted packages.config file"}]
-                    ))
-                except Exception:
-                    pass
+    if not applied:
+        return _csharp_recipe_result("cs-package-reference", "Migrate to PackageReference", ws, dry_run, applied)
 
-    return _csharp_recipe_result("cs-package-reference", "Migrate to PackageReference", ws, dry_run, applied)
+    if dry_run:
+        return _csharp_recipe_result("cs-package-reference", "Migrate to PackageReference", ws, dry_run, applied)
+
+    from app.adapters.base import CSharpRoslynAdapter
+    from app.core.domain.models import MigrationResult, MigrationStatistics
+    adapter = CSharpRoslynAdapter()
+    dummy_stats = MigrationStatistics(
+        files_scanned=len(applied),
+        files_modified=len(applied),
+        files_unchanged=0,
+        capabilities_run=1
+    )
+    dummy_res = MigrationResult(
+        result_id="dummy", job_id="dummy", project_id="dummy", plan_id="dummy",
+        status="SUCCESS", statistics=dummy_stats, changed_files=applied
+    )
+    validation = adapter.validate(str(ws), dummy_res)
+
+    if not validation.build_passed:
+        # Undo changes to csproj
+        for f, orig_content in original_contents.items():
+            f.write_text(orig_content, encoding="utf-8")
+        res = RecipeExecutionResult(recipe_id="cs-package-reference", recipe_name="Migrate to PackageReference")
+        res.status = "FAILED"
+        res.success = False
+        res.notes.extend(validation.warnings)
+        res.notes.append("Validation failed. Restored original project files.")
+        res.errors.extend(validation.errors)
+        return res
+
+    for pc_file in packages_config_files:
+        if not is_ignored_path(pc_file):
+            try:
+                pc_file.unlink()
+                applied.append(FileChangeMetadata(
+                    file=str(pc_file.relative_to(ws)),
+                    status="DELETED",
+                    tools=["Roslyn"],
+                    before_content="<packages />",
+                    after_content="",
+                    diff="--- packages.config\n+++ /dev/null\n",
+                    changes=[{"type": "PACKAGES_CONFIG_DELETION", "description": "Deleted packages.config file"}]
+                ))
+            except Exception:
+                pass
+
+    res = RecipeExecutionResult(recipe_id="cs-package-reference", recipe_name="Migrate to PackageReference")
+    res.changed_files.extend(applied)
+    res.status = "EXECUTED"
+    res.success = True
+    res.notes.extend(validation.warnings)
+    res.notes.append(
+        f"Validation: build_passed={validation.build_passed}, "
+        f"tests_passed={validation.tests_passed} ({validation.tests_total} test(s)), "
+        f"warnings={len(validation.warnings)}."
+    )
+    return res
 
 
 @register("cs-file-scoped-namespace")
