@@ -47,7 +47,13 @@ from app.dependency_analysis.parsers.python_parser import (
     parse_setup_cfg,
 )
 from app.dependency_analysis.registry import get_latest_stable_version
-from app.dependency_analysis.updater import update_package_json, update_requirements_txt
+from app.dependency_analysis.updater import (
+    update_package_json,
+    update_pom_xml,
+    update_pyproject_toml,
+    update_requirements_txt,
+    update_setup_cfg,
+)
 from app.dependency_analysis.validator import ValidationStatus as VS, validate_file
 
 log = logging.getLogger(__name__)
@@ -252,8 +258,14 @@ class DependencyAnalysisService:
             elif name.endswith(".csproj"):
                 file_changed = update_csproj(abs_path, deps)
 
-            # pyproject.toml / pom.xml / setup.cfg updates not yet implemented
-            # (no unsafe text replacement on complex formats)
+            elif name == "pyproject.toml":
+                file_changed = update_pyproject_toml(abs_path, deps)
+
+            elif name in ("setup.cfg", "setup.py"):
+                file_changed = update_setup_cfg(abs_path, deps)
+
+            elif name == "pom.xml":
+                file_changed = update_pom_xml(abs_path, deps)
 
             if file_changed:
                 changed.append(rel_path)

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.api import health, ingestion, analysis, migration, reports, capabilities, dependency_analysis, recipes, git_checkpoint
@@ -31,6 +32,18 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Landing page for the API server (the UI lives on the frontend)."""
+    return JSONResponse({
+        "service": "Enterprise Modernization Platform API",
+        "version": "1.0.0",
+        "status": "ok",
+        "message": "This is the backend API server. Open the web UI at http://localhost:3000 or the API docs at /docs.",
+        "docs": "/docs",
+    })
 
 # ── Security middleware ────────────────────────────────────────────────────────
 app.add_middleware(

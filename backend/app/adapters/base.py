@@ -281,52 +281,145 @@ adapter_registry = AdapterRegistry()
 
 class CSharpRoslynSyntaxTransformer:
     """
-    Roslyn / C# AST syntax modernization transformer.
-    Performs C# 10+ and .NET 8.0 AST transformations:
-    - Block namespace to file-scoped namespace (C# 10+):
-      `namespace Acme.Foo\n{\n ... \n}` -> `namespace Acme.Foo;\n\n ...`
-    - Target Framework Upgrade in .csproj:
-      `<TargetFramework>netcoreapp3.1</TargetFramework>` -> `<TargetFramework>net8.0</TargetFramework>`
+    C# syntax modernization transformer.
+
+    Performs a conservative, syntax-aware transformation:
+    - Block-scoped namespace -> file-scoped namespace (C# 10+).
+      Detection is string/comment-aware so literal `namespace X {` inside
+      strings or comments is never rewritten, and only files with exactly
+      ONE block namespace are converted (C# requires a single file-scoped
+      namespace per file). Files with multiple namespaces are left untouched
+      rather than producing broken output.
+    - .csproj <TargetFramework> / <TargetFrameworks> property upgrade.
+
+    This transformer never claims to parse a full Roslyn AST; it performs
+    safe lexical transformations only and reports what it did.
     """
+
+    def _skip_trivia(self, code: str, i: int, n: int) -> int:
+        """Advance past comments and string/char literals starting at or after i."""
+        while i < n:
+            c = code[i]
+            if c == "/" and i + 1 < n:
+                if code[i + 1] == "/":
+                    nl = code.find("\n", i)
+                    return (nl + 1) if nl != -1 else n
+                if code[i + 1] == "*":
+                    end = code.find("*/", i + 2)
+                    return (end + 2) if end != -1 else n
+            if c in ('"', "'", "`"):
+                quote = c
+                j = i + 1
+                while j < n:
+                    if code[j] == "\\":
+                        j += 2
+                        continue
+                    if code[j] == quote:
+                        break
+                    j += 1
+                return (j + 1) if j < n else n
+            return i
+        return n
+
+    def _find_namespace_blocks(self, code: str):
+        """Return list of (ns_name, ns_start, open_pos, close_pos, indent) for block namespaces."""
+        n = len(code)
+        i = 0
+        blocks = []
+        while i < n:
+            i = self._skip_trivia(code, i, n)
+            if i >= n:
+                break
+            if not code.startswith("namespace", i):
+                i += 1
+                continue
+            prev_ok = i == 0 or not (code[i - 1].isalnum() or code[i - 1] == "_")
+            after = i + len("namespace")
+            next_ok = after >= n or not (code[after].isalnum() or code[after] == "_")
+            if not (prev_ok and next_ok):
+                i += 1
+                continue
+            j = after
+            while j < n and (code[j].isspace() or code[j] in "\r\n"):
+                j += 1
+            name_start = j
+            while j < n and (code[j].isalnum() or code[j] in "_."):
+                j += 1
+            ns_name = code[name_start:j]
+            if not ns_name:
+                i += 1
+                continue
+            j2 = j
+            while j2 < n and code[j2].isspace():
+                j2 += 1
+            if j2 < n and code[j2] == "{":
+                open_pos = j2
+                line_start = code.rfind("\n", 0, i) + 1
+                indent = code[line_start:i]
+                # Find matching closing brace (string/comment-aware).
+                depth = 0
+                k = open_pos
+                while k < n:
+                    if code[k] in ('"', "'", "`"):
+                        k = self._skip_trivia(code, k, n)
+                        continue
+                    if code[k] == "/" and k + 1 < n and code[k + 1] in ("/", "*"):
+                        k = self._skip_trivia(code, k, n)
+                        continue
+                    if code[k] == "{":
+                        depth += 1
+                    elif code[k] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            blocks.append((ns_name, i, open_pos, k, indent))
+                            break
+                    k += 1
+                i = open_pos + 1
+            else:
+                i += 1
+        return blocks
+
     def transform_code(self, code: str, target_version: str = "net8.0") -> str:
-        transformed = code
+        """Convert a single block namespace to file-scoped; otherwise leave unchanged."""
+        blocks = self._find_namespace_blocks(code)
+        if len(blocks) != 1:
+            # Multiple namespaces or none: do not risk producing invalid code.
+            return code
+        ns_name, ns_start, open_pos, close_pos, indent = blocks[0]
+        line_start = code.rfind("\n", 0, ns_start) + 1
+        body = code[open_pos + 1:close_pos]
 
-        # 1. Convert block-scoped namespace to file-scoped namespace (C# 10+)
-        ns_match = re.search(r'^(?P<indent>[ \t]*)namespace\s+([a-zA-Z0-9_\.]+)\s*\n?\{\s*\n?', transformed, re.MULTILINE)
-        if ns_match:
-            ns_name = ns_match.group(2)
-            ns_indent = ns_match.group("indent")
-            pattern = r'^[ \t]*namespace\s+' + re.escape(ns_name) + r'\s*\n?\{\s*\n?'
-            transformed = re.sub(pattern, f'namespace {ns_name};\n\n', transformed, count=1, flags=re.MULTILINE)
-            # Remove the outermost namespace closing brace that closes the block.
-            transformed = self._strip_outer_brace(transformed)
-            # Dedent the former namespace body one level so it aligns with the file scoping.
-            if ns_indent:
-                body_indent = ns_indent if ns_indent == " " * len(ns_indent) else ns_indent
-                transformed = re.sub(
-                    rf'^{re.escape(ns_indent)}(?=[^\n])',
-                    '',
-                    transformed,
-                    flags=re.MULTILINE,
-                )
+        # Dedent the namespace body by one level, then trim the surrounding
+        # whitespace left behind by the removed opening/closing brace lines.
+        out_lines = []
+        for ln in body.split("\n"):
+            if ln.strip() == "":
+                out_lines.append("")
+            elif indent and ln.startswith(indent):
+                out_lines.append(ln[len(indent):])
+            else:
+                out_lines.append(ln)
+        dedented_body = "\n".join(out_lines).strip()
 
-        return transformed
+        leading = code[:line_start]  # everything before the namespace line
 
-    def _strip_outer_brace(self, text: str) -> str:
-        """Remove the namespace closing brace that closes the file-scoped namespace.
-
-        After the namespace opener is replaced with a `;` the file has exactly one
-        unmatched closing brace (the namespace's own `}`). Remove only that one —
-        leaves nested type/method braces untouched and balanced.
-        """
-        stripped = text.rstrip()
-        if stripped.count("{") == stripped.count("}") - 1:
-            stripped = re.sub(r'\}\s*$', '', stripped)
-        return stripped + '\n'
+        return leading + f"namespace {ns_name};\n\n" + dedented_body + "\n\n"
 
     def transform_csproj(self, content: str, target_framework: str = "net8.0") -> str:
         tf = target_framework if target_framework.startswith("net") else "net8.0"
-        return re.sub(r'<TargetFramework>[^<]+</TargetFramework>', f'<TargetFramework>{tf}</TargetFramework>', content)
+        # Upgrade single-target and multi-target properties. Legacy
+        # <TargetFrameworkVersion> (non-SDK style) is deliberately left alone
+        # because converting it requires an SDK-style project rewrite.
+        result = re.sub(
+            r"<TargetFramework>\s*[^<]+?\s*</TargetFramework>",
+            f"<TargetFramework>{tf}</TargetFramework>",
+            content,
+        )
+        return re.sub(
+            r"<TargetFrameworks>\s*[^<]+?\s*</TargetFrameworks>",
+            f"<TargetFrameworks>{tf}</TargetFrameworks>",
+            result,
+        )
 
 
 class CSharpRoslynAdapter(MigrationAdapter):
@@ -376,8 +469,8 @@ class CSharpRoslynAdapter(MigrationAdapter):
                 source_versions=[".NET Framework 4.x", ".NET Core 3.1", ".NET 5.0", ".NET 6.0"],
                 target_versions=[".NET 8.0", ".NET 9.0"],
                 risk=RiskLevel.LOW,
-                description="C# code modernization with Roslyn analyzers & dotnet format",
-                notes="" if has_dotnet else "dotnet CLI not found on host — using Roslyn AST normalizer",
+                description="C# syntax modernization (file-scoped namespaces) plus dotnet format cleanup when the CLI is available",
+                notes="" if has_dotnet else "dotnet CLI not found on host — syntax modernization only, no dotnet format",
             ),
 
             MigrationCapability(
@@ -388,17 +481,18 @@ class CSharpRoslynAdapter(MigrationAdapter):
                 source_versions=["C# 7.0", "C# 8.0", "C# 9.0"],
                 target_versions=["C# 10.0", "C# 11.0", "C# 12.0"],
                 risk=RiskLevel.LOW,
-                description="Roslyn AST file-scoped namespace and modern type syntax transformation",
+                description="File-scoped namespace conversion (C# 10+) via string/comment-aware lexical transformation",
             ),
             MigrationCapability(
                 name="csharp-dotnet-upgrade",
                 language="csharp",
                 provider="roslyn",
-                status=CapabilityStatus.AVAILABLE,
+                status=CapabilityStatus.PARTIAL,
                 source_versions=[".NET Framework 4.8", ".NET Core 3.1", ".NET 6.0"],
                 target_versions=[".NET 8.0", ".NET 9.0"],
                 risk=RiskLevel.MEDIUM,
-                description="Upgrade .csproj TargetFramework and dependencies to modern .NET",
+                description="Upgrade <TargetFramework> in SDK-style .csproj files; package reference upgrades are not automated",
+                notes="Legacy <TargetFrameworkVersion> and non-SDK projects are left unchanged.",
             ),
         ]
 
@@ -412,20 +506,20 @@ class CSharpRoslynAdapter(MigrationAdapter):
             steps=[
                 PlanStep(
                     step_id="step-1", order=1,
-                    name="Roslyn AST Syntax Modernization",
-                    description="Convert block-scoped namespaces to file-scoped, modernize using declarations and type syntax",
+                    name="File-scoped Namespace Conversion",
+                    description="Convert single block-scoped namespaces to file-scoped syntax (C# 10+); multi-namespace files are skipped",
                     adapter="csharp", capability="csharp-roslyn-ast",
                 ),
                 PlanStep(
                     step_id="step-2", order=2,
                     name=".NET Target Framework Upgrade",
-                    description=f"Upgrade <TargetFramework> in all .csproj files to {target_version or 'net8.0'}",
+                    description=f"Upgrade <TargetFramework>/<TargetFrameworks> in SDK-style .csproj files to {target_version or 'net8.0'}",
                     adapter="csharp", capability="csharp-dotnet-upgrade",
                 ),
                 PlanStep(
                     step_id="step-3", order=3,
                     name="Roslyn Formatting & Code Clean",
-                    description="Run dotnet format to apply Roslyn code style rules and clean up formatting",
+                    description="Run dotnet format to apply Roslyn code style rules when the dotnet CLI is available",
                     adapter="csharp", capability="csharp-modernization",
                 ),
             ],

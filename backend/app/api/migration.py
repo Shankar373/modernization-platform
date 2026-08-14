@@ -6,7 +6,6 @@ import traceback
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -154,7 +153,6 @@ async def execute_migration(request: ExecuteRequest, db: AsyncSession = Depends(
 
     db_plan = await CRUDRepository.get_migration_plan(db, request.plan_id)
     if db_plan:
-        from app.core.domain.models import MigrationPlan as ModelMigrationPlan
         proj = await CRUDRepository.get_project(db, db_plan.project_id)
         if not proj:
             raise HTTPException(status_code=404, detail="Project not found.")
@@ -250,6 +248,7 @@ async def approve_and_execute(request: ApproveAndExecuteRequest, db: AsyncSessio
     if not request.approved:
         raise HTTPException(status_code=400, detail="Execution requires explicit approval (approved=true).")
     try:
+        from datetime import datetime
         result_id = str(uuid.uuid4())
         job_id = str(uuid.uuid4())
         plan_id = f"all-{result_id}"
@@ -307,6 +306,7 @@ async def migrate_all(request: MigrateAllRequest, db: AsyncSession = Depends(get
     applicable adapter (Python/ruff, HTML, CSS, JS/prettier, JSON, YAML, Markdown).
     """
     try:
+        from datetime import datetime
         result_id = str(uuid.uuid4())
         job_id = str(uuid.uuid4())
         plan_id = f"all-{result_id}"
@@ -493,6 +493,7 @@ async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
     build_res = await CRUDRepository.get_build_result(db, result_id)
     test_res = await CRUDRepository.get_test_result(db, result_id)
     migration_err = await CRUDRepository.get_migration_error(db, result_id)
+    recipe_execs = await CRUDRepository.list_recipe_executions(db, result_id)
 
     checkpoint = checkpoints[0] if checkpoints else None
     
@@ -549,31 +550,42 @@ async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
         "skipped_stages": len([s for s in stages_data if s["status"] == "SKIPPED"]),
         "cancelled_stages": len([s for s in db_stages if s.status == "CANCELLED"]),
         "recipes_selected": recipes_selected,
-        "recipes_executed": len(db_run.changed_files) if db_run.changed_files else 0,
+        "recipes_executed": len(recipe_execs),
         "files_changed": stats.get("files_modified", 0),
-        "files_added": 0,
-        "files_deleted": 0,
+        "files_added": stats.get("files_added", 0),
+        "files_deleted": stats.get("files_deleted", 0),
         "rollback_count": 1 if checkpoint and checkpoint.rollback_status == "SUCCESS" else 0,
-        "retry_count": 0,
+        "retry_count": stats.get("retry_count", 0),
         "final_status": final_status
     }
 
     # 4. Recipes details
     recommendations = []
     if db_plan:
+        exec_by_name = {ex.recipe_name.lower(): ex for ex in recipe_execs if ex.recipe_name}
+        files_by_recipe: dict = {}
+        for cf in db_run.changed_files or []:
+            tools = cf.get("tools") or []
+            for tool in tools:
+                files_by_recipe.setdefault(str(tool).lower(), []).append(cf)
         for idx, step in enumerate(db_plan.steps, 1):
+            step_recipe = step.get("capability") or step.get("recipe") or step.get("name") or "Recipe"
+            recipe_key = step_recipe.lower()
+            exec_rec = exec_by_name.get(recipe_key)
+            affected = [{"file": cf.get("file"), "status": cf.get("status")}
+                        for cf in (files_by_recipe.get(recipe_key) or [])]
             recommendations.append({
-                "recipe": step.get("recipe", "Recipe"),
-                "score": 12,
-                "recommendation_reason": step.get("reason", "Upgrade compatibility"),
-                "applicability": "APPLICABLE",
+                "recipe": step_recipe,
+                "score": step.get("score"),
+                "recommendation_reason": step.get("description") or step.get("reason") or "Upgrade compatibility",
+                "applicability": step.get("applicability", "UNKNOWN"),
                 "dependencies": step.get("dependencies", []),
-                "conflicts": [],
+                "conflicts": step.get("conflicts", []),
                 "execution_order": step.get("order", idx),
-                "execution_status": "SUCCESS" if final_status == "SUCCESS" else "FAILED",
-                "execution_duration": "0.0s",
-                "affected_files": [],
-                "failure_reason": None
+                "execution_status": exec_rec.status if exec_rec else "NOT_EXECUTED",
+                "execution_duration": f"{exec_rec.duration_ms / 1000.0:.1f}s" if exec_rec else "0.0s",
+                "affected_files": affected,
+                "failure_reason": ""
             })
 
     # 5. Build/Test report data
@@ -639,8 +651,8 @@ async def get_report(result_id: str, db: AsyncSession = Depends(get_db)):
             "files_scanned": stats.get("files_scanned", 0),
             "files_changed": stats.get("files_modified", 0),
             "files_unchanged": stats.get("files_unchanged", 0),
-            "files_added": 0,
-            "files_deleted": 0,
+            "files_added": stats.get("files_added", 0),
+            "files_deleted": stats.get("files_deleted", 0),
             "transformation_engine": "OpenRewrite" if "java" in [str(l.get("name", l) if isinstance(l, dict) else l).lower() for l in (db_profile.languages if db_profile else [])] else "Ruff",
             "transformation_duration": next((s["duration"] for s in stages_data if s["name"] == "TRANSFORMATION"), "0.0s")
         },

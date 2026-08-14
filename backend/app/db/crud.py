@@ -55,8 +55,8 @@ class CRUDRepository:
         project_id: str,
         profile_data: Dict[str, Any]
     ) -> DBProjectProfile:
-        db_profile = DBProjectProfile(
-            project_id=project_id,
+        existing = await CRUDRepository.get_project_profile(db, project_id)
+        profile_fields = dict(
             languages=profile_data.get("languages", []),
             frameworks=profile_data.get("frameworks", []),
             build_systems=profile_data.get("build_systems", []),
@@ -68,6 +68,16 @@ class CRUDRepository:
             total_lines=profile_data.get("total_lines", 0),
             is_multi_language=profile_data.get("is_multi_language", False),
             raw_scan_metadata=profile_data.get("raw_scan_metadata", {}),
+        )
+        if existing:
+            for key, value in profile_fields.items():
+                setattr(existing, key, value)
+            await db.commit()
+            await db.refresh(existing)
+            return existing
+        db_profile = DBProjectProfile(
+            project_id=project_id,
+            **profile_fields,
         )
         db.add(db_profile)
         await db.commit()
@@ -339,6 +349,15 @@ class CRUDRepository:
         await db.refresh(db_exec)
         return db_exec
 
+    @staticmethod
+    async def list_recipe_executions(db: AsyncSession, run_id: str) -> List[DBRecipeExecution]:
+        result = await db.execute(
+            select(DBRecipeExecution)
+            .filter(DBRecipeExecution.run_id == run_id)
+            .order_by(DBRecipeExecution.execution_id.asc())
+        )
+        return list(result.scalars().all())
+
     # ── BuildResult ───────────────────────────────────────────────────────────
     @staticmethod
     async def create_build_result(
@@ -431,6 +450,17 @@ class CRUDRepository:
         summary: Optional[str] = None,
         full_report_json: Dict[str, Any] = None,
     ) -> DBMigrationReport:
+        # Upsert: a run should only ever have one report row.
+        existing = await CRUDRepository.get_migration_report(db, run_id)
+        if existing:
+            existing.risk_level = risk_level
+            if summary is not None:
+                existing.summary = summary
+            if full_report_json is not None:
+                existing.full_report_json = full_report_json
+            await db.commit()
+            await db.refresh(existing)
+            return existing
         db_rep = DBMigrationReport(
             run_id=run_id,
             risk_level=risk_level,
@@ -446,4 +476,39 @@ class CRUDRepository:
     async def get_migration_report(db: AsyncSession, run_id: str) -> Optional[DBMigrationReport]:
         result = await db.execute(select(DBMigrationReport).filter(DBMigrationReport.run_id == run_id))
         return result.scalars().first()
+
+    @staticmethod
+    async def list_migration_reports(
+        db: AsyncSession,
+        project_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List all migration reports joined with their run metadata."""
+        stmt = (
+            select(DBMigrationReport, DBMigrationRun)
+            .join(DBMigrationRun, DBMigrationRun.result_id == DBMigrationReport.run_id)
+            .order_by(DBMigrationReport.created_at.desc())
+        )
+        if project_id:
+            stmt = stmt.filter(DBMigrationRun.project_id == project_id)
+        result = await db.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "report_id": rep.report_id,
+                "run_id": run.result_id,
+                "project_id": run.project_id,
+                "plan_id": run.plan_id,
+                "job_id": run.job_id,
+                "status": run.status,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                "risk_level": rep.risk_level,
+                "summary": rep.summary,
+                "statistics": run.statistics,
+                "changed_files": run.changed_files,
+                "warnings": run.warnings,
+                "manual_remediation": run.manual_remediation,
+                "created_at": rep.created_at.isoformat() if rep.created_at else None,
+            }
+            for rep, run in rows
+        ]
 

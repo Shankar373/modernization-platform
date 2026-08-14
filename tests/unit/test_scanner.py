@@ -36,4 +36,4 @@ def test_language_detection_java():
         assert "Java" in languages
         
         java_lang = next(l for l in profile.languages if l.name == "Java")
-        assert java_lang.version == "11"
+        assert java_lang.version == "Java 11"

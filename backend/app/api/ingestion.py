@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
