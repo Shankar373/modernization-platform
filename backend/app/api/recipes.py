@@ -570,7 +570,7 @@ def _detect_conflicts(recipe_ids: List[str]) -> List[Dict]:
     conflicts = []
     from app.recipes.executor import has_handler
     for rid in recipe_ids:
-        if rid.startswith("cs-") and not has_handler(rid):
+        if not has_handler(rid):
             conflicts.append({
                 "recipe_a": rid,
                 "recipe_b": "",
@@ -671,7 +671,7 @@ async def recommend_recipes(req: RecommendRequest):
             continue
 
         from app.recipes.executor import has_handler
-        if recipe["id"].startswith("cs-") and not has_handler(recipe["id"]):
+        if not has_handler(recipe["id"]):
             continue
 
         score, reasons = _score_recipe(recipe, req)
@@ -769,7 +769,7 @@ async def generate_migration_plan(req: PlanRequest):
     """Generate the final Migration Plan from selected recipes and approved dependency updates."""
     from app.recipes.executor import has_handler
     for rid in req.selected_recipe_ids:
-        if rid.startswith("cs-") and not has_handler(rid):
+        if not has_handler(rid):
             raise HTTPException(
                 status_code=400,
                 detail=f"Selected recipe '{rid}' is NOT_IMPLEMENTED and cannot be part of the migration plan."
@@ -847,7 +847,7 @@ async def execute_recipes(req: ExecuteRequest):
     """
     from app.recipes.executor import has_handler
     for rid in req.recipe_ids:
-        if rid.startswith("cs-") and not has_handler(rid):
+        if not has_handler(rid):
             raise HTTPException(
                 status_code=400,
                 detail=f"Recipe '{rid}' is NOT_IMPLEMENTED and cannot be executed."

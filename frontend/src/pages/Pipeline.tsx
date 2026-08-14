@@ -57,8 +57,8 @@ const STEPS: Step[] = [
   { key: 'conflict-resolution',number: 10, title: 'Conflict Resolution',       icon: '⚡', auto: false },
   { key: 'plan',               number: 11, title: 'Migration Plan',            icon: '🗺️', auto: false },
   { key: 'checkpointing',      number: 12, title: 'Git Checkpoint',            icon: '🎯', auto: true  },
-  { key: 'executing-recipes',  number: 13, title: 'Execute Recipes',           icon: '🛠️', auto: true  },
-  { key: 'done',               number: 13, title: 'Execute Recipes',           icon: '✅', auto: true  },
+  { key: 'executing-recipes',  number: 12, title: 'Execute Recipes',           icon: '🛠️', auto: true  },
+  { key: 'done',               number: 12, title: 'Execute Recipes',           icon: '✅', auto: true  },
 ];
 
 const DISPLAY_STEPS = STEPS.filter(s => s.key !== 'done');

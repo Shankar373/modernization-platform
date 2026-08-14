@@ -981,5 +981,238 @@ def _cs_var_modernization(ws: Path, dry_run: bool) -> RecipeExecutionResult:
     return _csharp_recipe_result("cs-var-modernization", "Local Variable var Modernization", ws, dry_run, applied)
 
 
+
+# ── Handlers: Python (extended) ────────────────────────────────────────────────
+
+@register("py-pathlib")
+def _py_pathlib_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Replace os.path calls with pathlib.Path equivalents."""
+    res = RecipeExecutionResult(recipe_id="py-pathlib", recipe_name="Modernize: pathlib")
+    _OS_PATH_EXIST    = re.compile(r"os\.path\.exists\(([^)]+)\)")
+    _OS_PATH_DIRNAME  = re.compile(r"os\.path\.dirname\(([^)]+)\)")
+    _OS_PATH_BASENAME = re.compile(r"os\.path\.basename\(([^)]+)\)")
+    _OS_PATH_ISFILE   = re.compile(r"os\.path\.isfile\(([^)]+)\)")
+    _OS_PATH_ISDIR    = re.compile(r"os\.path\.isdir\(([^)]+)\)")
+    py_files = list(_iter_files(ws, suffixes={".py"}))
+    if not py_files:
+        res.status = "NOT_APPLICABLE"
+        res.notes.append("No Python files found.")
+        return res
+    applied = 0
+    for f in py_files:
+        try:
+            orig = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        new = orig
+        new = _OS_PATH_EXIST.sub(lambda m: f"Path({m.group(1)}).exists()", new)
+        new = _OS_PATH_DIRNAME.sub(lambda m: f"Path({m.group(1)}).parent", new)
+        new = _OS_PATH_BASENAME.sub(lambda m: f"Path({m.group(1)}).name", new)
+        new = _OS_PATH_ISFILE.sub(lambda m: f"Path({m.group(1)}).is_file()", new)
+        new = _OS_PATH_ISDIR.sub(lambda m: f"Path({m.group(1)}).is_dir()", new)
+        if new != orig:
+            applied += 1
+            rel = str(f.relative_to(ws))
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            res.changed_files.append(_build_change(
+                rel, orig, new, "pathlib-modernizer",
+                "PY_PATHLIB", "Replaced os.path calls with pathlib.Path equivalents."))
+    res.notes.append(f"Converted {applied} file(s) to use pathlib." if applied else "No os.path patterns found.")
+    return res
+
+
+@register("py-walrus")
+def _py_walrus_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Identify walrus operator (:=) opportunities in re.match/search patterns."""
+    res = RecipeExecutionResult(recipe_id="py-walrus", recipe_name="Modernize: Walrus Operator (:=)")
+    _ASSIGN_IF = re.compile(
+        r"^(\s*)(\w+)\s*=\s*(re\.(?:match|search|fullmatch)\([^\n]+)\n(\s*)if\s+\2\s*:",
+        re.MULTILINE,
+    )
+    py_files = list(_iter_files(ws, suffixes={".py"}))
+    if not py_files:
+        res.status = "NOT_APPLICABLE"
+        res.notes.append("No Python files found.")
+        return res
+    applied = 0
+    for f in py_files:
+        try:
+            orig = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        new = _ASSIGN_IF.sub(lambda m: f"{m.group(4)}if {m.group(2)} := {m.group(3)}:", orig)
+        if new != orig:
+            applied += 1
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            res.changed_files.append(_build_change(
+                str(f.relative_to(ws)), orig, new, "walrus-modernizer",
+                "PY_WALRUS", "Introduced walrus operator (:=)."))
+    res.notes.append(f"Applied walrus in {applied} file(s)." if applied else "No walrus opportunities found.")
+    return res
+
+
+@register("py-ruff-format")
+def _py_ruff_format_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Format Python code using ruff formatter."""
+    import subprocess
+    res = RecipeExecutionResult(recipe_id="py-ruff-format", recipe_name="Ruff: Code Formatting")
+    if not list(_iter_files(ws, suffixes={".py"})):
+        res.status = "NOT_APPLICABLE"; res.notes.append("No Python files."); return res
+    try:
+        cmd = ["ruff", "format"] + (["--check"] if dry_run else []) + [str(ws)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        res.notes.append((r.stdout or r.stderr or "Ruff format completed.")[:400])
+    except FileNotFoundError:
+        res.status = "NOT_APPLICABLE"
+        res.notes.append("ruff not found in PATH. Install with: pip install ruff")
+    except subprocess.TimeoutExpired:
+        res.status = "FAILED"; res.notes.append("ruff format timed out.")
+    return res
+
+
+@register("py-ruff-lint")
+def _py_ruff_lint_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Auto-fix lint issues using ruff."""
+    import subprocess
+    res = RecipeExecutionResult(recipe_id="py-ruff-lint", recipe_name="Ruff: Auto-fix Lint Issues")
+    if not list(_iter_files(ws, suffixes={".py"})):
+        res.status = "NOT_APPLICABLE"; res.notes.append("No Python files."); return res
+    try:
+        cmd = ["ruff", "check"] + (["--no-fix"] if dry_run else ["--fix"]) + [str(ws)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        issues = [l for l in (r.stdout or "").splitlines() if ".py:" in l]
+        res.notes.append(f"Ruff lint: {'found' if dry_run else 'fixed'} {len(issues)} issue(s).")
+        if r.stderr:
+            res.notes.append(f"stderr: {r.stderr[:200]}")
+    except FileNotFoundError:
+        res.status = "NOT_APPLICABLE"
+        res.notes.append("ruff not found in PATH. Install with: pip install ruff")
+    except subprocess.TimeoutExpired:
+        res.status = "FAILED"; res.notes.append("ruff check timed out.")
+    return res
+
+
+@register("gen-editorconfig")
+def _gen_editorconfig_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Add or update .editorconfig with modern cross-language defaults."""
+    res = RecipeExecutionResult(recipe_id="gen-editorconfig", recipe_name="Add/Update .editorconfig")
+    target = ws / ".editorconfig"
+    content = (
+        "# EditorConfig: https://editorconfig.org\nroot = true\n\n"
+        "[*]\nindent_style = space\nindent_size = 4\nend_of_line = lf\n"
+        "charset = utf-8\ntrim_trailing_whitespace = true\ninsert_final_newline = true\n\n"
+        "[*.{js,ts,jsx,tsx,json,yaml,yml,md,html,css}]\nindent_size = 2\n\n"
+        "[*.{cs,csproj}]\nindent_size = 4\n\n"
+        "[Makefile]\nindent_style = tab\n"
+    )
+    if target.exists():
+        orig = target.read_text(encoding="utf-8")
+        if "EditorConfig" in orig:
+            res.status = "NOT_APPLICABLE"
+            res.notes.append(".editorconfig already present.")
+            return res
+    else:
+        orig = ""
+    if not dry_run:
+        target.write_text(content, encoding="utf-8")
+    status = "MODIFIED" if orig else "ADDED"
+    res.changed_files.append(FileChangeMetadata(
+        file=".editorconfig", status=status,
+        before_content=orig, after_content=content,
+        diff=f"+ {status} .editorconfig", tools=["editorconfig-generator"],
+        changes=[{"type": "GEN_EDITORCONFIG", "description": "Generated/updated .editorconfig."}],
+    ))
+    res.notes.append("Generated/updated .editorconfig with modern cross-language defaults.")
+    return res
+
+
+@register("gen-gitignore")
+def _gen_gitignore_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Update .gitignore with modern comprehensive patterns."""
+    res = RecipeExecutionResult(recipe_id="gen-gitignore", recipe_name="Update .gitignore")
+    target = ws / ".gitignore"
+    additions = (
+        "\n# === SystemaOps modern additions ===\n"
+        "# Python\n__pycache__/\n*.py[cod]\n.venv/\nvenv/\ndist/\nbuild/\n*.egg-info/\n"
+        ".pytest_cache/\n.mypy_cache/\n.ruff_cache/\n"
+        "# .NET / C#\nbin/\nobj/\n*.user\n.vs/\n*.nupkg\npackages/\n"
+        "# Node\nnode_modules/\n.next/\n.env.local\n"
+        "# IDE\n.idea/\n.vscode/\n*.swp\n"
+        "# OS\n.DS_Store\nThumbs.db\n"
+    )
+    if target.exists():
+        orig = target.read_text(encoding="utf-8")
+        if "SystemaOps modern additions" in orig:
+            res.status = "NOT_APPLICABLE"
+            res.notes.append(".gitignore already has modernization additions.")
+            return res
+        new_content = orig.rstrip() + "\n" + additions
+        status = "MODIFIED"
+    else:
+        orig = ""
+        new_content = additions.lstrip()
+        status = "ADDED"
+    if not dry_run:
+        target.write_text(new_content, encoding="utf-8")
+    res.changed_files.append(FileChangeMetadata(
+        file=".gitignore", status=status,
+        before_content=orig, after_content=new_content,
+        diff=f"+ {status} .gitignore with modern patterns", tools=["gitignore-updater"],
+        changes=[{"type": "GEN_GITIGNORE", "description": "Updated .gitignore."}],
+    ))
+    res.notes.append("Updated .gitignore with modern patterns.")
+    return res
+
+
+@register("py-type-hints")
+def _py_type_hints_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Add PEP 484 type hints to public function signatures lacking annotations."""
+    res = RecipeExecutionResult(recipe_id="py-type-hints", recipe_name="Add Type Hints (PEP 484)")
+    _UNANNOTATED = re.compile(
+        r"^(\s*def\s+)([a-zA-Z][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*(?!->):",
+        re.MULTILINE,
+    )
+
+    def _ann(params: str) -> str:
+        if not params.strip():
+            return params
+        out = []
+        for p in params.split(","):
+            p = p.strip()
+            if not p or p in ("self", "cls") or p.startswith("*") or ":" in p or "=" in p:
+                out.append(p)
+            else:
+                out.append(f"{p}: Any")
+        return ", ".join(out)
+
+    py_files = list(_iter_files(ws, suffixes={".py"}))
+    if not py_files:
+        res.status = "NOT_APPLICABLE"; res.notes.append("No Python files."); return res
+    applied = 0
+    for f in py_files:
+        try:
+            orig = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        if "-> Any" in orig and "from typing import" in orig:
+            continue
+        new = _UNANNOTATED.sub(
+            lambda m: f"{m.group(1)}{m.group(2)}({_ann(m.group(3))}) -> Any:", orig
+        )
+        if new != orig:
+            if "from typing import Any" not in new:
+                new = "from typing import Any\n" + new
+            applied += 1
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            res.changed_files.append(_build_change(
+                str(f.relative_to(ws)), orig, new, "type-hint-injector",
+                "PY_TYPE_HINTS", "Added PEP 484 type annotations."))
+    res.notes.append(f"Added type hints to {applied} file(s)." if applied else "No unannotated functions found.")
+    return res
+
+
 def get_executor_help() -> list[str]:
     return sorted(_REGISTRY.keys())
