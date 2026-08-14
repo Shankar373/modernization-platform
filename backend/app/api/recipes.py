@@ -568,6 +568,16 @@ def _resolve_execution_order(recipe_ids: List[str]) -> List[str]:
 
 def _detect_conflicts(recipe_ids: List[str]) -> List[Dict]:
     conflicts = []
+    from app.recipes.executor import has_handler
+    for rid in recipe_ids:
+        if rid.startswith("cs-") and not has_handler(rid):
+            conflicts.append({
+                "recipe_a": rid,
+                "recipe_b": "",
+                "severity": "ERROR",
+                "reason": f"Recipe '{rid}' is NOT_IMPLEMENTED and does not have an execution handler.",
+                "resolution": f"Remove '{rid}' from selection.",
+            })
     for rid in recipe_ids:
         recipe = _CATALOG_BY_ID.get(rid)
         if not recipe:
@@ -658,6 +668,10 @@ async def recommend_recipes(req: RecommendRequest):
             ))
 
         if not is_tool_available:
+            continue
+
+        from app.recipes.executor import has_handler
+        if recipe["id"].startswith("cs-") and not has_handler(recipe["id"]):
             continue
 
         score, reasons = _score_recipe(recipe, req)
@@ -753,6 +767,13 @@ def _build_phases(ordered_ids: List[str]) -> List[Dict]:
 @router.post("/recipes/plan")
 async def generate_migration_plan(req: PlanRequest):
     """Generate the final Migration Plan from selected recipes and approved dependency updates."""
+    from app.recipes.executor import has_handler
+    for rid in req.selected_recipe_ids:
+        if rid.startswith("cs-") and not has_handler(rid):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Selected recipe '{rid}' is NOT_IMPLEMENTED and cannot be part of the migration plan."
+            )
     ordered_ids = _resolve_execution_order(req.selected_recipe_ids)
     selected = [_CATALOG_BY_ID[rid] for rid in ordered_ids if rid in _CATALOG_BY_ID]
     phases = _build_phases(ordered_ids)
@@ -824,6 +845,13 @@ async def execute_recipes(req: ExecuteRequest):
     workspace and returns per-recipe changed files + security findings.
     Use dry_run=true to preview without modifying files.
     """
+    from app.recipes.executor import has_handler
+    for rid in req.recipe_ids:
+        if rid.startswith("cs-") and not has_handler(rid):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Recipe '{rid}' is NOT_IMPLEMENTED and cannot be executed."
+            )
     if not req.recipe_ids:
         return {"recipes": [], "summary": "No recipes selected."}
 
