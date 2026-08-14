@@ -147,50 +147,22 @@ function DiffBlock({ diff, fileName }: { diff: string; fileName: string }) {
 
 function ChangedFileCard({ f, idx, dryRun }: { f: import('../types').OptimizedFileChange; idx: number; dryRun: boolean }) {
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'final-diff' | 'mod-diff' | 'opt-diff' | 'orig' | 'mod' | 'opt'>('final-diff');
+  const [showFullCode, setShowFullCode] = useState(false);
   const statusColor = f.validation_status === 'PASSED' ? '#10b981' : f.validation_status === 'FAILED' ? '#ef4444' : '#6b7280';
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'mod-diff':
-        return <DiffBlock diff={f.modernization_diff || ''} fileName={`${f.file} (Modernization Diff)`} />;
-      case 'opt-diff':
-        return <DiffBlock diff={f.optimization_diff || ''} fileName={`${f.file} (Cleanup Diff)`} />;
-      case 'final-diff':
-        return <DiffBlock diff={f.final_diff || f.diff || ''} fileName={`${f.file} (Final Unified Diff)`} />;
-      case 'orig':
-        return (
-          <pre style={{ margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {f.original_content || '/* Empty file */'}
-          </pre>
-        );
-      case 'mod':
-        return (
-          <pre style={{ margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {f.modernized_content || f.before_content || '/* Empty file */'}
-          </pre>
-        );
-      case 'opt':
-        return (
-          <pre style={{ margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {f.optimized_content || f.after_content || '/* Empty file */'}
-          </pre>
-        );
-    }
-  };
+  let fileStatus: 'CHANGED' | 'UNCHANGED' | 'SKIPPED' | 'FAILED' = 'UNCHANGED';
+  if (f.validation_status === 'FAILED') {
+    fileStatus = 'FAILED';
+  } else if (f.validation_status === 'SKIPPED') {
+    fileStatus = 'SKIPPED';
+  } else if (f.changed) {
+    fileStatus = 'CHANGED';
+  }
 
-  const tabStyle = (tab: typeof activeTab) => ({
-    padding: '6px 12px',
-    border: 'none',
-    background: activeTab === tab ? 'var(--color-accent)' : 'transparent',
-    color: activeTab === tab ? '#fff' : 'var(--color-text-muted)',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 11,
-    fontWeight: 600 as const,
-    marginRight: 6,
-    transition: 'all 0.2s',
-  });
+  const statusBadgeColor = 
+    fileStatus === 'CHANGED' ? '#10b981' :
+    fileStatus === 'FAILED' ? '#ef4444' :
+    fileStatus === 'SKIPPED' ? '#f59e0b' : '#6b7280';
 
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
@@ -201,9 +173,8 @@ function ChangedFileCard({ f, idx, dryRun }: { f: import('../types').OptimizedFi
         <span style={{ color: 'var(--color-text-muted)', fontSize: 11, fontWeight: 700, width: 24, flexShrink: 0 }}>#{idx + 1}</span>
         <span style={{ fontFamily: 'monospace', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file}</span>
         <Badge text={f.recipe} color="#6366f1" />
+        <Badge text={fileStatus} color={statusBadgeColor} />
         <Badge text={f.validation_status} color={statusColor} />
-        {f.changed && <Badge text="CHANGED" color="#10b981" />}
-        {!f.changed && <Badge text="UNCHANGED" color="#6b7280" />}
         <span style={{ color: 'var(--color-text-muted)', fontSize: 16 }}>{open ? '▲' : '▼'}</span>
       </div>
       {open && (
@@ -213,22 +184,44 @@ function ChangedFileCard({ f, idx, dryRun }: { f: import('../types').OptimizedFi
               ℹ️ Preview only — no files were modified.
             </div>
           )}
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
-            <strong>Cleanup/Optimization description:</strong> {f.optimization}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12, fontSize: 12 }}>
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Recipe Applied:</span>{' '}
+              <strong style={{ fontFamily: 'monospace' }}>{f.recipe}</strong>
+            </div>
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Optimization Tool:</span>{' '}
+              <strong>{f.optimization}</strong>
+            </div>
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Status:</span>{' '}
+              <strong style={{ color: statusBadgeColor }}>{fileStatus}</strong>
+            </div>
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Validation:</span>{' '}
+              <strong style={{ color: statusColor }}>{f.validation_status}</strong>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: 12, background: 'rgba(0,0,0,0.1)', padding: 4, borderRadius: 6, width: 'max-content' }}>
-            <button style={tabStyle('final-diff')} onClick={() => setActiveTab('final-diff')}>Final Diff</button>
-            <button style={tabStyle('mod-diff')} onClick={() => setActiveTab('mod-diff')}>Modernization Diff</button>
-            <button style={tabStyle('opt-diff')} onClick={() => setActiveTab('opt-diff')}>Cleanup Diff</button>
-            <button style={tabStyle('orig')} onClick={() => setActiveTab('orig')}>Original</button>
-            <button style={tabStyle('mod')} onClick={() => setActiveTab('mod')}>Modernized</button>
-            <button style={tabStyle('opt')} onClick={() => setActiveTab('opt')}>Cleaned</button>
-          </div>
+          <DiffBlock diff={f.final_diff || f.diff || ''} fileName={f.file} />
 
-          <div style={{ marginTop: 8 }}>
-            {renderTabContent()}
-          </div>
+          <button 
+            style={{
+              marginTop: 12, padding: '6px 12px', background: 'rgba(29, 127, 138, 0.08)',
+              border: '1px solid rgba(29, 127, 138, 0.2)', color: 'var(--color-accent)',
+              borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              transition: 'all 0.2s'
+            }}
+            onClick={() => setShowFullCode(s => !s)}
+          >
+            {showFullCode ? 'Hide Full Code' : 'View Full Final File'}
+          </button>
+
+          {showFullCode && (
+            <pre style={{ marginTop: 12, margin: 0, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {f.optimized_content || f.after_content || '/* Empty file */'}
+            </pre>
+          )}
         </div>
       )}
     </div>
