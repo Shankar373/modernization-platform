@@ -343,17 +343,17 @@ function DepReviewStep({
               const key = u.dependency_name + u.source_file;
               const checked = approvedIds.has(key);
               return (
-                <div key={key} onClick={() => toggle(key)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer', transition: 'opacity 0.15s' }}>
+                <div key={key} onClick={() => toggle(key)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer', transition: 'opacity 0.15s', flexWrap: 'nowrap' }}>
                   <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--color-accent)' : 'rgba(0,0,0,0.2)'}`, background: checked ? 'var(--color-accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     {checked && <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>✓</span>}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{u.dependency_name}</span>
-                    <span className="text-muted text-sm" style={{ marginLeft: 10 }}>{u.source_file}</span>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 10px' }}>
+                    <span style={{ fontWeight: 600, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{u.dependency_name}</span>
+                    <span className="text-muted text-sm" style={{ wordBreak: 'break-all' }}>{u.source_file}</span>
                   </div>
-                  <span style={{ color: 'var(--color-text-muted)', fontFamily: 'monospace', fontSize: 13 }}>{u.current_version || 'unconstrained'}</span>
-                  <span style={{ color: 'var(--color-text-muted)' }}>→</span>
-                  <span style={{ color: 'var(--color-accent)', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>{u.proposed_version}</span>
+                  <span style={{ color: 'var(--color-text-muted)', fontFamily: 'monospace', fontSize: 13, flexShrink: 0 }}>{u.current_version || 'unconstrained'}</span>
+                  <span style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>→</span>
+                  <span style={{ color: 'var(--color-accent)', fontFamily: 'monospace', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{u.proposed_version}</span>
                 </div>
               );
             })}
