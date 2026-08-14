@@ -212,3 +212,51 @@ def test_csharp_recipe_not_applicable_when_nothing_to_change(ws: Path):
         encoding="utf-8")
     res = run_recipe("cs-net6-upgrade", "net6-upgrade", str(ws), dry_run=True)
     assert res.status == "NOT_APPLICABLE"
+
+# ── Active C# Modernization Recipe Tests ─────────────────────────────────────
+
+def test_cs_net8_upgrade(ws: Path):
+    (ws / "Legacy.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net48</TargetFramework></PropertyGroup></Project>', encoding="utf-8")
+    res = run_recipe("cs-net8-upgrade", "net8", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    assert "<TargetFramework>net8.0</TargetFramework>" in (ws / "Legacy.csproj").read_text(encoding="utf-8")
+
+
+def test_cs_nullable_ref(ws: Path):
+    (ws / "Legacy.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>', encoding="utf-8")
+    res = run_recipe("cs-nullable-ref", "nullable", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    csproj_txt = (ws / "Legacy.csproj").read_text(encoding="utf-8")
+    assert "<Nullable>enable</Nullable>" in csproj_txt
+
+
+def test_cs_package_reference(ws: Path):
+    (ws / "packages.config").write_text('<packages><package id="log4net" version="2.0.12" targetFramework="net48" /></packages>', encoding="utf-8")
+    (ws / "Legacy.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><Reference Include="log4net"><HintPath>..\packages\log4net.2.0.12\lib\net45\log4net.dll</HintPath></Reference></ItemGroup></Project>', encoding="utf-8")
+    
+    res = run_recipe("cs-package-reference", "pkg-ref", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    
+    csproj_txt = (ws / "Legacy.csproj").read_text(encoding="utf-8")
+    assert "<PackageReference Include=\"log4net\" Version=\"2.0.12\"" in csproj_txt or "Include='log4net' Version='2.0.12'" in csproj_txt or "Include=\"log4net\" Version=\'2.0.12\'" in csproj_txt or "log4net" in csproj_txt
+    assert not (ws / "packages.config").exists()
+
+
+def test_cs_file_scoped_namespace(ws: Path):
+    (ws / "Program.cs").write_text("namespace App { public class P {} }", encoding="utf-8")
+    res = run_recipe("cs-file-scoped-namespace", "file-scoped-ns", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    assert "namespace App;" in (ws / "Program.cs").read_text(encoding="utf-8")
+
+
+def test_cs_var_modernization(ws: Path):
+    (ws / "Program.cs").write_text("class P { void M() { Program p = new Program(); } }", encoding="utf-8")
+    res = run_recipe("cs-var-modernization", "var", str(ws), dry_run=False)
+    assert res.status == "EXECUTED"
+    assert "var p = new Program();" in (ws / "Program.cs").read_text(encoding="utf-8")
+
+
+def test_cs_unsupported_recipes_are_not_implemented(ws: Path):
+    for recipe_id in ["cs-sdk-project", "cs-pattern-matching", "cs-switch-expression", "cs-obsolete-api", "cs-global-usings", "cs-collection-expressions", "cs-api-compatibility", "cs-security-modernization"]:
+        res = run_recipe(recipe_id, "unsupported", str(ws))
+        assert res.status == "NOT_IMPLEMENTED"

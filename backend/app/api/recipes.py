@@ -238,54 +238,154 @@ RECIPE_CATALOG: List[Dict[str, Any]] = [
     },
     # ── C# / .NET ─────────────────────────────────────────────────────────────
     {
+        "id": "cs-net8-upgrade",
+        "name": ".NET Framework → .NET 8 Upgrade",
+        "description": "Migrate TargetFramework to net8.0. Updates System.* namespace usage, removes deprecated APIs.",
+        "language": "csharp", "category": "upgrade", "complexity": "high",
+        "tags": ["dotnet", "csharp", "upgrade", "net8"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 15, "risk": "HIGH", "estimated_impact": "Modern target runtime"
+    },
+    {
         "id": "cs-nullable-ref",
         "name": "Enable Nullable Reference Types",
-        "description": "Enable <Nullable>enable</Nullable> in .csproj and annotate all reference types. Roslyn flow analysis eliminates null dereference bugs at compile time.",
+        "description": "Enable <Nullable>enable</Nullable> in .csproj to eliminate null dereference bugs at compile time.",
         "language": "csharp", "category": "upgrade", "complexity": "medium",
         "tags": ["nullable", "dotnet", "csharp", "safety"],
         "requires": [], "conflicts_with": [],
         "min_version": "8.0", "max_version": None,
-        "priority": 8, "risk": "MEDIUM", "estimated_impact": "Eliminate null-reference runtime exceptions via Roslyn static analysis"
+        "priority": 8, "risk": "MEDIUM", "estimated_impact": "Null safety"
     },
     {
-        "id": "cs-net6-upgrade",
-        "name": ".NET Framework → .NET 6/8 Upgrade",
-        "description": "Migrate TargetFramework from net4x / netstandard2.0 to net6.0 or net8.0. Updates System.* namespace usage, removes deprecated APIs, and migrates app host configuration.",
-        "language": "csharp", "category": "upgrade", "complexity": "high",
-        "tags": ["dotnet", "csharp", "upgrade", "net6", "net8", "migration"],
+        "id": "cs-package-reference",
+        "name": "Migrate to PackageReference",
+        "description": "Convert legacy packages.config references and HintPaths to SDK-style PackageReference tags.",
+        "language": "csharp", "category": "upgrade", "complexity": "medium",
+        "tags": ["dotnet", "csharp", "nuget"],
         "requires": [], "conflicts_with": [],
         "min_version": None, "max_version": None,
-        "priority": 15, "risk": "HIGH", "estimated_impact": "Long-term support framework and performance improvements (AOT eligible)"
+        "priority": 10, "risk": "MEDIUM", "estimated_impact": "Clean package references"
     },
     {
-        "id": "cs-var-keyword",
-        "name": "Local Variable Type Inference (var)",
-        "description": "Replace verbose explicit local variable declarations with var where the type is obvious. Improves readability without losing type safety.",
+        "id": "cs-sdk-project",
+        "name": "Convert to SDK-style Project",
+        "description": "Convert legacy MSBuild .csproj format to modern SDK-style format.",
+        "language": "csharp", "category": "upgrade", "complexity": "high",
+        "tags": ["dotnet", "csharp", "sdk"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 12, "risk": "HIGH", "estimated_impact": "Modern SDK project format"
+    },
+    {
+        "id": "cs-file-scoped-namespace",
+        "name": "File-scoped Namespace Conversion",
+        "description": "Convert block-scoped namespace definitions to C# 10 file-scoped namespaces.",
+        "language": "csharp", "category": "style", "complexity": "low",
+        "tags": ["style", "csharp", "dotnet"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "10.0", "max_version": None,
+        "priority": 3, "risk": "LOW", "estimated_impact": "Reduced indentation nesting"
+    },
+    {
+        "id": "cs-var-modernization",
+        "name": "Local Variable var Modernization",
+        "description": "Replace explicit redundant variable declarations with var.",
         "language": "csharp", "category": "style", "complexity": "low",
         "tags": ["style", "csharp", "dotnet", "var"],
         "requires": [], "conflicts_with": [],
         "min_version": "3.0", "max_version": None,
-        "priority": 2, "risk": "LOW", "estimated_impact": "Reduce boilerplate type annotations in local scopes"
+        "priority": 2, "risk": "LOW", "estimated_impact": "Cleaner variable declarations"
+    },
+    {
+        "id": "cs-pattern-matching",
+        "name": "Pattern Matching Modernization",
+        "description": "Utilize modern C# pattern matching constructs for type and null checking.",
+        "language": "csharp", "category": "style", "complexity": "medium",
+        "tags": ["style", "csharp", "dotnet"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "7.0", "max_version": None,
+        "priority": 5, "risk": "LOW", "estimated_impact": "Expressive type queries"
+    },
+    {
+        "id": "cs-switch-expression",
+        "name": "Switch Expression Modernization",
+        "description": "Convert switch statements to modern switch expressions where eligible.",
+        "language": "csharp", "category": "style", "complexity": "medium",
+        "tags": ["style", "csharp", "dotnet"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "8.0", "max_version": None,
+        "priority": 5, "risk": "LOW", "estimated_impact": "Cleaner switch evaluation"
     },
     {
         "id": "cs-async-await",
         "name": "Synchronous → async/await Migration",
-        "description": "Convert blocking synchronous I/O patterns (Thread.Sleep, .Result, .Wait()) to async/await with Task-based asynchronous pattern (TAP). Improves throughput under load.",
+        "description": "Convert blocking synchronous I/O patterns to Task-based async/await.",
         "language": "csharp", "category": "upgrade", "complexity": "high",
-        "tags": ["async", "await", "dotnet", "csharp", "performance"],
+        "tags": ["async", "await", "dotnet", "performance"],
         "requires": [], "conflicts_with": [],
         "min_version": "5.0", "max_version": None,
-        "priority": 10, "risk": "HIGH", "estimated_impact": "Thread pool efficiency and I/O-bound scalability improvements"
+        "priority": 10, "risk": "HIGH", "estimated_impact": "Thread pool throughput improvements"
     },
     {
         "id": "cs-dependency-injection",
         "name": "Manual DI → Microsoft.Extensions.DI",
-        "description": "Migrate from manual service instantiation / static service locator patterns to Microsoft.Extensions.DependencyInjection. Register services in IServiceCollection, use constructor injection throughout.",
+        "description": "Migrate static service locator patterns to standard constructor dependency injection.",
         "language": "csharp", "category": "upgrade", "complexity": "medium",
-        "tags": ["di", "dependency-injection", "aspnet", "csharp", "dotnet"],
+        "tags": ["di", "csharp", "dotnet"],
         "requires": [], "conflicts_with": [],
         "min_version": None, "max_version": None,
-        "priority": 9, "risk": "MEDIUM", "estimated_impact": "Loosely coupled, testable service architecture for ASP.NET Core"
+        "priority": 9, "risk": "MEDIUM", "estimated_impact": "Testable architecture"
+    },
+    {
+        "id": "cs-obsolete-api",
+        "name": "Obsolete API Modernization",
+        "description": "Identify and replace obsolete APIs with their modern equivalents.",
+        "language": "csharp", "category": "upgrade", "complexity": "medium",
+        "tags": ["dotnet", "csharp", "deprecation"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 7, "risk": "MEDIUM", "estimated_impact": "Up-to-date API usage"
+    },
+    {
+        "id": "cs-global-usings",
+        "name": "Global Usings Modernization",
+        "description": "Consolidate common namespace imports into global using statements.",
+        "language": "csharp", "category": "style", "complexity": "low",
+        "tags": ["style", "csharp", "dotnet"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "10.0", "max_version": None,
+        "priority": 2, "risk": "LOW", "estimated_impact": "Reduced boilerplate using directives"
+    },
+    {
+        "id": "cs-collection-expressions",
+        "name": "Collection Expressions Modernization",
+        "description": "Convert old collection initialization structures to C# 12 collection expressions.",
+        "language": "csharp", "category": "style", "complexity": "low",
+        "tags": ["style", "csharp", "dotnet"],
+        "requires": [], "conflicts_with": [],
+        "min_version": "12.0", "max_version": None,
+        "priority": 4, "risk": "LOW", "estimated_impact": "Unified initialization syntax"
+    },
+    {
+        "id": "cs-api-compatibility",
+        "name": "API Compatibility Analysis",
+        "description": "Scan and analyze project dependencies and APIs for target runtime compatibility.",
+        "language": "csharp", "category": "upgrade", "complexity": "medium",
+        "tags": ["dotnet", "csharp", "compatibility"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 8, "risk": "LOW", "estimated_impact": "Risk assessment"
+    },
+    {
+        "id": "cs-security-modernization",
+        "name": "C# Security Modernization",
+        "description": "Scan for outdated or unsafe C# libraries, configurations, or coding practices.",
+        "language": "csharp", "category": "security", "complexity": "medium",
+        "tags": ["security", "dotnet", "csharp"],
+        "requires": [], "conflicts_with": [],
+        "min_version": None, "max_version": None,
+        "priority": 12, "risk": "MEDIUM", "estimated_impact": "Secure codebase"
     },
 ]
 

@@ -619,13 +619,61 @@ def _py_f_strings_handler(ws: Path, dry_run: bool) -> RecipeExecutionResult:
 
 # ── Handlers: C# / .NET (Roslyn) ───────────────────────────────────────────────
 
-def _csharp_adapter_and_plan(ws: Path):
-    """Instantiate the C# Roslyn adapter and build a .NET 8 target migration plan."""
+def _csharp_adapter_and_plan(ws: Path, target_version: str = "net8.0"):
+    """Instantiate the C# Roslyn adapter and build a target migration plan."""
     from app.adapters.base import CSharpRoslynAdapter
     from app.core.domain.models import TechnologyProfile
     adapter = CSharpRoslynAdapter()
-    plan = adapter.create_plan(str(ws), TechnologyProfile(), target_version="net8.0")
+    plan = adapter.create_plan(str(ws), TechnologyProfile(), target_version=target_version)
     return adapter, plan
+
+
+def _csharp_recipe_result(rid: str, name: str, ws: Path, dry_run: bool, applied_changes: List, success: bool = True, notes: List[str] = None) -> RecipeExecutionResult:
+    """Helper to return validation metrics and changed files for C# execution."""
+    res = RecipeExecutionResult(recipe_id=rid, recipe_name=name)
+    if notes:
+        res.notes.extend(notes)
+    
+    if not applied_changes:
+        res.status = "NOT_APPLICABLE"
+        res.notes.append("No files require transformation.")
+        return res
+
+    res.changed_files.extend(applied_changes)
+    
+    if dry_run:
+        res.status = "EXECUTED"
+        res.notes.append(f"Dry run: {len(applied_changes)} file(s) would change.")
+        return res
+
+    from app.adapters.base import CSharpRoslynAdapter
+    from app.core.domain.models import MigrationResult, MigrationStatistics
+    adapter = CSharpRoslynAdapter()
+    dummy_stats = MigrationStatistics(
+        files_scanned=len(applied_changes),
+        files_modified=len(applied_changes),
+        files_unchanged=0,
+        capabilities_run=1
+    )
+    dummy_res = MigrationResult(
+        result_id="dummy", job_id="dummy", project_id="dummy", plan_id="dummy",
+        status="SUCCESS", statistics=dummy_stats, changed_files=applied_changes
+    )
+    validation = adapter.validate(str(ws), dummy_res)
+    res.notes.extend(validation.warnings)
+    res.notes.append(
+        f"Validation: build_passed={validation.build_passed}, "
+        f"tests_passed={validation.tests_passed} ({validation.tests_total} test(s)), "
+        f"warnings={len(validation.warnings)}."
+    )
+    if not validation.build_passed:
+        res.status = "FAILED"
+        res.success = False
+        res.errors.extend(validation.errors)
+    else:
+        res.status = "EXECUTED"
+        res.success = True
+    return res
 
 
 @register("cs-net6-upgrade")
@@ -648,7 +696,6 @@ def _cs_net6_upgrade(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         preview = adapter.dry_run(str(ws), plan)
         if preview.notes:
             res.notes.append(preview.notes)
-        # Accurate in-memory preview of the transformations (no files written).
         transformer = CSharpRoslynSyntaxTransformer()
         applied = 0
         for f in _iter_files(ws, suffixes={".cs", ".csproj"}):
@@ -692,6 +739,198 @@ def _cs_net6_upgrade(ws: Path, dry_run: bool) -> RecipeExecutionResult:
         res.success = False
         res.errors.extend(validation.errors)
     return res
+
+
+@register("cs-net8-upgrade")
+def _cs_net8_upgrade(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Upgrade .csproj TargetFramework properties to net8.0."""
+    from app.adapters.base import CSharpRoslynSyntaxTransformer
+    transformer = CSharpRoslynSyntaxTransformer()
+    applied = []
+    
+    for f in _iter_files(ws, suffixes={".csproj"}):
+        orig = f.read_text(encoding="utf-8", errors="replace")
+        new = transformer.transform_csproj(orig, "net8.0")
+        if new != orig:
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            applied.append(_build_change(
+                str(f.relative_to(ws)), orig, new, "roslyn-net8-upgrade",
+                "CS_NET8_UPGRADE", "Upgraded TargetFramework to net8.0"
+            ))
+
+    return _csharp_recipe_result("cs-net8-upgrade", ".NET Framework → .NET 8 Upgrade", ws, dry_run, applied)
+
+
+@register("cs-nullable-ref")
+def _cs_nullable_ref(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Enable <Nullable>enable</Nullable> in .csproj files."""
+    applied = []
+    for f in _iter_files(ws, suffixes={".csproj"}):
+        orig = f.read_text(encoding="utf-8", errors="replace")
+        if "<Nullable>" in orig:
+            continue
+        match = re.search(r"<PropertyGroup\s*[^>]*>", orig, re.IGNORECASE)
+        if match:
+            pos = match.end()
+            new = orig[:pos] + "\n    <Nullable>enable</Nullable>" + orig[pos:]
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            applied.append(_build_change(
+                str(f.relative_to(ws)), orig, new, "roslyn-nullable",
+                "CS_NULLABLE_REF", "Enabled Nullable Reference Types"
+            ))
+
+    return _csharp_recipe_result("cs-nullable-ref", "Enable Nullable Reference Types", ws, dry_run, applied)
+
+
+@register("cs-package-reference")
+def _cs_package_reference(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Migrate legacy reference HintPaths and packages.config to PackageReference."""
+    import xml.etree.ElementTree as ET
+    applied = []
+    
+    packages = []
+    packages_config_files = list(ws.rglob("packages.config"))
+    for pc_file in packages_config_files:
+        if is_ignored_path(pc_file):
+            continue
+        try:
+            xml_text = pc_file.read_text(encoding="utf-8", errors="replace")
+            pc_root = ET.fromstring(xml_text)
+            for pkg in pc_root.iter():
+                pkg_tag = pkg.tag.split("}")[-1].lower()
+                if pkg_tag == "package":
+                    pid = pkg.get("id")
+                    ver = pkg.get("version")
+                    if pid and ver:
+                        packages.append((pid, ver))
+        except Exception:
+            pass
+
+    for f in _iter_files(ws, suffixes={".csproj"}):
+        orig = f.read_text(encoding="utf-8", errors="replace")
+        try:
+            root = ET.fromstring(orig)
+            changed = False
+            
+            references_to_remove = []
+            for item_group in root.findall(".//ItemGroup"):
+                for ref in list(item_group):
+                    ref_tag = ref.tag.split("}")[-1].lower()
+                    if ref_tag == "reference":
+                        hint_path = ref.find(".//HintPath")
+                        if hint_path is not None and hint_path.text and "packages/" in hint_path.text.lower():
+                            include_attr = ref.get("Include", "")
+                            lib_name = include_attr.split(",")[0].strip()
+                            references_to_remove.append((item_group, ref, lib_name))
+
+            package_references_to_add = {}
+            for item_group, ref, lib_name in references_to_remove:
+                item_group.remove(ref)
+                changed = True
+                ver = "1.0.0"
+                for pid, pver in packages:
+                    if pid.lower() == lib_name.lower():
+                        ver = pver
+                        break
+                package_references_to_add[lib_name] = ver
+
+            for pid, pver in packages:
+                if pid not in package_references_to_add:
+                    package_references_to_add[pid] = pver
+                    changed = True
+
+            if package_references_to_add:
+                item_group = ET.SubElement(root, "ItemGroup")
+                for pid, pver in package_references_to_add.items():
+                    pref = ET.SubElement(item_group, "PackageReference")
+                    pref.set("Include", pid)
+                    pref.set("Version", pver)
+                changed = True
+
+            if changed:
+                new = ET.tostring(root, encoding="utf-8").decode("utf-8")
+                if not dry_run:
+                    f.write_text(new, encoding="utf-8")
+                applied.append(_build_change(
+                    str(f.relative_to(ws)), orig, new, "roslyn-package-reference",
+                    "CS_PACKAGE_REFERENCE", "Migrated legacy Reference HintPaths to PackageReference"
+                ))
+        except Exception:
+            pass
+
+    if not dry_run:
+        for pc_file in packages_config_files:
+            if not is_ignored_path(pc_file):
+                try:
+                    pc_file.unlink()
+                    applied.append(FileChangeMetadata(
+                        file=str(pc_file.relative_to(ws)),
+                        status="DELETED",
+                        tools=["Roslyn"],
+                        before_content="<packages />",
+                        after_content="",
+                        diff="--- packages.config\n+++ /dev/null\n",
+                        changes=[{"type": "PACKAGES_CONFIG_DELETION", "description": "Deleted packages.config file"}]
+                    ))
+                except Exception:
+                    pass
+
+    return _csharp_recipe_result("cs-package-reference", "Migrate to PackageReference", ws, dry_run, applied)
+
+
+@register("cs-file-scoped-namespace")
+def _cs_file_scoped_namespace(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Convert C# namespace declarations to file-scoped syntax."""
+    from app.adapters.base import CSharpRoslynSyntaxTransformer
+    transformer = CSharpRoslynSyntaxTransformer()
+    applied = []
+    
+    for f in _iter_files(ws, suffixes={".cs"}):
+        orig = f.read_text(encoding="utf-8", errors="replace")
+        new = transformer.transform_code(orig, "net8.0")
+        if new != orig:
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            applied.append(_build_change(
+                str(f.relative_to(ws)), orig, new, "roslyn-file-scoped-ns",
+                "CS_FILE_SCOPED_NAMESPACE", "Converted namespace block to file-scoped namespace (C# 10+)"
+            ))
+
+    return _csharp_recipe_result("cs-file-scoped-namespace", "File-scoped Namespace Conversion", ws, dry_run, applied)
+
+
+@register("cs-var-modernization")
+def _cs_var_modernization(ws: Path, dry_run: bool) -> RecipeExecutionResult:
+    """Replace explicit variable declarations with var."""
+    applied = []
+    pattern = r"\b([a-zA-Z0-9_.]+)\s+([a-zA-Z0-9_]+)\s*=\s*new\s+\1\s*\((.*?)\)\s*;"
+    keywords_and_builtins = {
+        "int", "string", "double", "float", "bool", "char", "long", "short", "byte", "decimal",
+        "return", "throw", "yield", "class", "namespace", "using", "public", "private", 
+        "protected", "internal", "static", "readonly", "override", "virtual", "new", "true", "false"
+    }
+    
+    for f in _iter_files(ws, suffixes={".cs"}):
+        orig = f.read_text(encoding="utf-8", errors="replace")
+        
+        def repl(match):
+            type_name, var_name, args = match.groups()
+            if type_name in keywords_and_builtins or var_name in keywords_and_builtins:
+                return match.group(0)
+            return f"var {var_name} = new {type_name}({args});"
+
+        new, count = re.subn(pattern, repl, orig)
+        if count > 0:
+            if not dry_run:
+                f.write_text(new, encoding="utf-8")
+            applied.append(_build_change(
+                str(f.relative_to(ws)), orig, new, "roslyn-var-modernization",
+                "CS_VAR_MODERNIZATION", "Replaced redundant explicit type with var"
+            ))
+
+    return _csharp_recipe_result("cs-var-modernization", "Local Variable var Modernization", ws, dry_run, applied)
 
 
 def get_executor_help() -> list[str]:
