@@ -99,7 +99,8 @@ pip install -r requirements.txt
 alembic upgrade head
 
 # Start FastAPI server (with 1GB upload limit)
-$env:MAX_UPLOAD_SIZE_MB="1024"; uvicorn app.main:app --port 8000 --reload
+$env:MAX_UPLOAD_SIZE_MB="1024"
+python -m uvicorn app.main:app --port 8000 --host 0.0.0.0 --reload
 ```
 
 
@@ -108,8 +109,9 @@ In a new terminal:
 ```bash
 cd backend
 .venv\Scripts\activate
-celery -A app.workers.celery_app worker --loglevel=info --pool=solo
 
+# Run Celery with solo pool (required on Windows)
+celery -A app.workers.celery_app worker --loglevel=info --pool=solo
 ```
 
 ### 4. Frontend Setup
