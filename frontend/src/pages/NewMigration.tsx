@@ -107,7 +107,7 @@ export default function NewMigration() {
               {file ? file.name : 'Drag and drop your ZIP file here or click to browse'}
             </p>
             <p className="text-muted text-sm">
-              {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'Supported archive types: .zip (max 100MB)'}
+              {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'Supported archive types: .zip (max 4GB)'}
             </p>
             <input
               ref={fileRef}
