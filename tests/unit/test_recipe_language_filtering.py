@@ -144,3 +144,28 @@ def test_unsupported_connector_excludes_recipe():
         result = asyncio.run(recommend_recipes(req))
     ids = {r["id"] for r in result["recipes"]}
     assert not any(i.startswith("cs-") for i in ids), "C# recipes should be excluded if capability is NOT_AVAILABLE"
+
+
+def test_mixed_language_migration_allows_csharp_and_typescript():
+    req = RecommendRequest(
+        project_id="p1",
+        workspace_path="/tmp/ws",
+        languages=["c#", "typescript"],
+        target_languages=["csharp", "typescript"],
+        detected_deps=[],
+        has_tests=False,
+        has_ci=False,
+    )
+    with patch.object(registry, "get_for_language") as mock_get:
+        mock_get.return_value = [
+            MigrationCapability(
+                name="fake",
+                language="fake",
+                provider="fake",
+                status=CapabilityStatus.AVAILABLE,
+            )
+        ]
+        result = asyncio.run(recommend_recipes(req))
+    ids = {r["id"] for r in result["recipes"]}
+    assert any(i.startswith("cs-") for i in ids), "expected C# recipes"
+    assert any(i.startswith("ts-") for i in ids), "expected TS recipes"
