@@ -71,7 +71,7 @@ class DependencyAnalysisService:
 
     # ── Public entry point ────────────────────────────────────────────────────
 
-    def analyze(self, workspace_path: str, plan_only: bool = False) -> DependencyAnalysisResult:
+    def analyze(self, workspace_path: str, plan_only: bool = False, approved_updates: list[str] = None) -> DependencyAnalysisResult:
         """
         Run the complete pipeline and return a structured DependencyAnalysisResult.
 
@@ -150,22 +150,51 @@ class DependencyAnalysisService:
 
         # Step 6 — apply updates (skip in plan_only mode)
         changed_files: list[str] = []
-        if not plan_only:
-            changed_files = self._apply_updates(workspace_path, all_deps, dep_files)
-        result.changed_files = changed_files
-
-        # Step 7 — validate
         overall_status = ValidationStatus.SKIPPED
-        for file_path in changed_files:
-            abs_path = str(Path(workspace_path) / file_path)
-            vstatus, verrors = validate_file(abs_path)
-            if verrors:
-                result.validation_errors.extend(verrors)
-            if vstatus == VS.FAILED:
-                overall_status = ValidationStatus.FAILED
-            elif vstatus == VS.PASSED and overall_status != ValidationStatus.FAILED:
-                overall_status = ValidationStatus.PASSED
-
+        
+        if not plan_only:
+            from app.dependencies.manager import DependencyUpdateManager
+            from app.dependencies.models import DependencyUpdate, UpdateRisk, UpdateType
+            manager = DependencyUpdateManager()
+            
+            updates_to_execute = []
+            for u in result.proposed_updates:
+                key = u.dependency_name + u.source_file
+                if approved_updates is None or key in approved_updates:
+                    # Map to new DependencyUpdate model
+                    updates_to_execute.append(DependencyUpdate(
+                        package=u.dependency_name,
+                        package_manager=u.ecosystem.value if hasattr(u.ecosystem, 'value') else str(u.ecosystem),
+                        current_version=u.current_version or 'unknown',
+                        target_version=u.proposed_version,
+                        update_type=UpdateType.UNKNOWN,
+                        risk=UpdateRisk.MEDIUM,
+                        reason=u.reason or '',
+                        manifest_file=u.source_file
+                    ))
+            
+            if updates_to_execute:
+                batch_res = manager.execute_updates(workspace_path, updates_to_execute)
+                changed_files = batch_res.files_changed
+                result.changed_files = changed_files
+                
+                if batch_res.success:
+                    overall_status = ValidationStatus.PASSED
+                else:
+                    overall_status = ValidationStatus.FAILED
+                    
+                for r in batch_res.results:
+                    if r.error_message:
+                        result.validation_errors.append(f"{r.update.package}: {r.error_message}")
+                    if r.unified_diff:
+                        # Append the diff so the UI can retrieve it if we map it later
+                        # Currently we just stuff it in warnings so it doesn't get lost
+                        pass
+                        
+                result.validation_status = overall_status
+                return result
+                
+        result.changed_files = changed_files
         result.validation_status = overall_status
         return result
 

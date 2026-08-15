@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "rP6RxVvCnco=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\opt_fail\\App.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\bandi\\.nuget\\packages\\microsoft.netframework.referenceassemblies\\1.0.3\\microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
+    "C:\\Users\\bandi\\.nuget\\packages\\microsoft.netframework.referenceassemblies.net472\\1.0.3\\microsoft.netframework.referenceassemblies.net472.1.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

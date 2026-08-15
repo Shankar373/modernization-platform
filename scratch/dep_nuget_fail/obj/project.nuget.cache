@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "dgSpecHash": "92rBMd1OxKA=",
+  "success": false,
+  "projectFilePath": "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\dep_nuget_fail\\Project.csproj",
+  "expectedPackageFiles": [],
+  "logs": [
+    {
+      "code": "NU1101",
+      "level": "Error",
+      "message": "Unable to find package Fake.NonExistent.Package. No packages exist with this id in source(s): nuget.org",
+      "libraryId": "Fake.NonExistent.Package",
+      "targetGraphs": [
+        "net8.0"
+      ]
+    }
+  ]
+}

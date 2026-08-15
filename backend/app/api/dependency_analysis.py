@@ -28,6 +28,7 @@ class DependencyAnalysisRequest(BaseModel):
     project_id: str
     force_refresh: bool = False   # bypass cache, re-query registries
     plan_only: bool = False        # when True: detect + compare, but do NOT write files
+    approved_updates: list[str] = [] # list of 'pkg_name source_file' keys
 
 
 @router.post("/dependency-analysis")
@@ -50,6 +51,7 @@ async def run_dependency_analysis(request: DependencyAnalysisRequest):
             _service.analyze,
             request.workspace_path,
             request.plan_only,
+            request.approved_updates,
         )
 
         result_dict = result.model_dump()

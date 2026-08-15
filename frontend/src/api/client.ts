@@ -129,12 +129,13 @@ export const planDependencyAnalysis = (workspacePath: string, projectId: string)
  * Apply approved dependency updates to disk.
  * Runs the full pipeline (detect → compare → apply → validate).
  */
-export const applyDependencyUpdates = (workspacePath: string, projectId: string) =>
+export const applyDependencyUpdates = (workspacePath: string, projectId: string, approvedIds: string[]) =>
   API.post('/dependency-analysis', {
     workspace_path: workspacePath,
     project_id: projectId,
     force_refresh: true,
     plan_only: false,
+    approved_updates: approvedIds,
   });
 
 // ── Recipe API ─────────────────────────────────────────────────────────────────

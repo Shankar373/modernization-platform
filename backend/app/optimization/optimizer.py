@@ -42,10 +42,12 @@ _GENERATED_PATTERNS = (".min.js", ".min.css", ".bundle.js", "-lock.json")
 _SKIP_DIRS = {
     "node_modules", ".venv", "venv", "__pycache__", ".git",
     "dist", "build", ".next", ".vs", ".idea", "obj", "bin",
+    "vendor", "packages", "lib",
 }
 
 
 def _is_generated(path: Path) -> bool:
+    import re
     name_lower = path.name.lower()
     if name_lower in _GENERATED_NAMES:
         return True
@@ -55,6 +57,8 @@ def _is_generated(path: Path) -> bool:
     for pat in _GENERATED_PATTERNS:
         if name_lower.endswith(pat):
             return True
+    if re.match(r'^(jquery|bootstrap|popper|modernizr|microsoftajax).*\.js$', name_lower):
+        return True
     return False
 
 
@@ -400,10 +404,13 @@ def _run_dotnet_format(ws: Path, rel_files: List[str], dry_run: bool) -> dict[st
     return result_map
 
 
-def _run_prettier(ws: Path, rel_files: List[str], dry_run: bool) -> dict[str, str]:
-    """Run Prettier on JS/TS files, returning formatted contents."""
+def _run_prettier(ws: Path, rel_files: List[str], dry_run: bool) -> Optional[dict[str, str]]:
+    """Run Prettier on JS/TS files, returning formatted contents. Returns None if prettier is unavailable."""
     node_modules_prettier = ws / "node_modules" / ".bin" / "prettier"
     prettier = str(node_modules_prettier) if node_modules_prettier.exists() else shutil.which("prettier")
+
+    if not prettier:
+        return None
 
     result_map = {}
     for rel in rel_files:
@@ -412,7 +419,7 @@ def _run_prettier(ws: Path, rel_files: List[str], dry_run: bool) -> dict[str, st
             continue
         before = abs_path.read_text(encoding="utf-8", errors="replace")
 
-        if dry_run or not prettier:
+        if dry_run:
             result_map[rel] = before
             continue
 
@@ -460,16 +467,23 @@ def _validate_workspace(ws: Path, language: str) -> tuple[bool, str]:
             if _is_skip_dir(csproj, ws):
                 continue
             try:
+                subprocess.run(
+                    ["dotnet", "restore", str(csproj)],
+                    capture_output=True, text=True, timeout=120, cwd=str(ws)
+                )
                 res = subprocess.run(
                     ["dotnet", "build", str(csproj), "--no-restore", "--verbosity", "minimal"],
                     capture_output=True, text=True, timeout=120, cwd=str(ws)
                 )
                 if res.returncode != 0:
                     build_ok = False
-                    errors.append(f"Build failed for {csproj.name}: {res.stderr or res.stdout}")
+                    output = res.stderr or res.stdout
+                    is_env_error = any(code in output for code in ["MSB4019", "MSB3644", "NETSDK1004", "net6.0-windows"])
+                    prefix = "BUILD_ENVIRONMENT_FAILURE: " if is_env_error else "SOURCE_VALIDATION_FAILURE: "
+                    errors.append(f"{prefix}Build failed for {csproj.name}: {output}")
             except Exception as e:
                 build_ok = False
-                errors.append(f"Build exception for {csproj.name}: {e}")
+                errors.append(f"BUILD_ENVIRONMENT_FAILURE: Build exception for {csproj.name}: {e}")
                 
         if not build_ok:
             return False, "\n".join(errors)
@@ -530,7 +544,9 @@ def _validate_workspace(ws: Path, language: str) -> tuple[bool, str]:
 
     elif language in ("javascript", "typescript"):
         tsc = shutil.which("tsc")
-        if tsc:
+        # Only run tsc if tsconfig.json or jsconfig.json exists
+        has_config = list(ws.rglob("tsconfig.json")) or list(ws.rglob("jsconfig.json"))
+        if tsc and has_config:
             try:
                 proc = subprocess.run(
                     [tsc, "--noEmit", "--allowJs", "--checkJs"],
@@ -656,14 +672,20 @@ class CodeOptimizer:
 
         # Run formatters to get optimized contents
         optimized_contents: dict[str, str] = {}
+        prettier_skipped = False
+
         if py_files:
             optimized_contents.update(_run_ruff(ws, py_files, dry_run))
         if cs_files:
             optimized_contents.update(_run_dotnet_format(ws, cs_files, dry_run))
-        if js_files:
-            optimized_contents.update(_run_prettier(ws, js_files, dry_run))
-        if ts_files:
-            optimized_contents.update(_run_prettier(ws, ts_files, dry_run))
+        
+        js_ts_files = js_files + ts_files
+        if js_ts_files:
+            prettier_res = _run_prettier(ws, js_ts_files, dry_run)
+            if prettier_res is None:
+                prettier_skipped = True
+            else:
+                optimized_contents.update(prettier_res)
 
         # ── Source Preservation Gate Validation ───────────────────────────────
         gate_failed = False
@@ -710,14 +732,14 @@ class CodeOptimizer:
                 ))
             
             result.optimized_files = all_changes
-            result.files_optimized = len(all_changes)
+            result.files_optimized = 0
             result.files_changed = 0
-            result.files_unchanged = len(all_changes)
+            result.files_unchanged = 0
             result.files_failed = len(all_changes)
             result.build_passed = False
             result.rolled_back = True
             result.success = False
-            result.error = gate_error_msg
+            result.error = "SOURCE_VALIDATION_FAILURE: " + gate_error_msg
             return result
 
         # ── Language post-optimization build/test validation ──────────────────
@@ -761,9 +783,9 @@ class CodeOptimizer:
                 ))
             
             result.optimized_files = all_changes
-            result.files_optimized = len(all_changes)
+            result.files_optimized = 0
             result.files_changed = 0
-            result.files_unchanged = len(all_changes)
+            result.files_unchanged = 0
             result.files_failed = len(all_changes)
             result.build_passed = False
             result.rolled_back = True
@@ -776,22 +798,35 @@ class CodeOptimizer:
         for rel in all_target_files:
             original = snapshot_original[rel]
             modernized = snapshot_modernized[rel]
-            optimized = optimized_contents.get(rel, modernized)
+            
+            lang = _detect_language(ws / rel)
+            is_js_ts = lang in ("javascript", "typescript")
+            
+            if is_js_ts and prettier_skipped:
+                optimized = modernized
+                opt_desc = "SKIPPED — Prettier not available"
+                val_status = "SKIPPED"
+                changed = False
+            else:
+                optimized = optimized_contents.get(rel, modernized)
+                changed = optimized != modernized
+                if is_js_ts:
+                    opt_desc = "Prettier: code cleanup"
+                elif lang == "csharp":
+                    opt_desc = "dotnet format: unused usings, indentation"
+                else:
+                    opt_desc = "Ruff format + lint fix (unused imports, indentation)"
+                    
+                val_status = "PASSED" if changed else "UNCHANGED"
+                if not changed:
+                    opt_desc = "Applied (unchanged)"
             
             # Generate diffs from real contents
             mod_diff = snapshot_modernization_diff[rel]
             opt_diff = _make_unified_diff(modernized, optimized, rel)
             fin_diff = _make_unified_diff(original, optimized, rel)
             
-            changed = optimized != modernized
-            
-            lang = _detect_language(ws / rel)
             recipe_name = "dotnet format" if lang == "csharp" else "ruff" if lang == "python" else "prettier"
-            opt_desc = (
-                "dotnet format: unused usings, indentation" if lang == "csharp"
-                else "Ruff format + lint fix (unused imports, indentation)" if lang == "python"
-                else "Prettier: code cleanup"
-            )
             
             all_changes.append(OptimizedFileChange(
                 file=rel,
@@ -804,7 +839,7 @@ class CodeOptimizer:
                 optimization_diff=opt_diff,
                 final_diff=fin_diff,
                 changed=changed,
-                validation_status="PASSED",
+                validation_status=val_status,
             ))
 
         result.optimized_files = all_changes

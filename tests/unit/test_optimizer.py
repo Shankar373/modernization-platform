@@ -94,6 +94,15 @@ def test_is_not_generated_regular():
     assert _is_generated(Path("Program.cs")) is False
     assert _is_generated(Path("main.py")) is False
 
+def test_is_generated_vendor_libraries():
+    assert _is_generated(Path("jquery.min.js")) is True
+    assert _is_generated(Path("jquery-3.6.0.js")) is True
+    assert _is_generated(Path("bootstrap.js")) is True
+    assert _is_generated(Path("popper.js")) is True
+    assert _is_generated(Path("modernizr-custom.js")) is True
+    assert _is_generated(Path("MicrosoftAjax.debug.js")) is True
+    assert _is_generated(Path("index.js")) is False
+
 
 # ── Test: Unified diff generation ─────────────────────────────────────────────
 

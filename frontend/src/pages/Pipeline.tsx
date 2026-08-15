@@ -122,29 +122,79 @@ function InfoCard({ icon, label, value }: { icon: string; label: string; value: 
 // ── OptimizingStep ─────────────────────────────────────────────────────────────
 
 function DiffBlock({ diff, fileName }: { diff: string; fileName: string }) {
-  const lines = diff ? diff.split('\n') : [];
+  const [showFull, setShowFull] = useState(false);
+  const allLines = diff ? diff.split('\n') : [];
+  const isTruncated = !showFull && allLines.length > 300;
+  const lines = isTruncated ? allLines.slice(0, 300) : allLines;
+
   return (
-    <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: 320 }}>
+    <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--color-surface-2)', borderRadius: 6, overflow: 'auto', maxHeight: showFull ? 'none' : 320 }}>
       <div style={{ padding: '6px 12px', background: 'rgba(0,0,0,0.2)', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>
         {fileName}
       </div>
       <div style={{ padding: '4px 0' }}>
-        {lines.map((line, i) => {
-          const isAdd = line.startsWith('+') && !line.startsWith('+++');
-          const isDel = line.startsWith('-') && !line.startsWith('---');
-          const isHdr = line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++');
-          return (
-            <div key={i} style={{
-              padding: '1px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-              background: isAdd ? 'rgba(16,185,129,0.12)' : isDel ? 'rgba(239,68,68,0.12)' : isHdr ? 'rgba(99,102,241,0.08)' : 'transparent',
-              color: isAdd ? '#34d399' : isDel ? '#f87171' : isHdr ? '#818cf8' : 'var(--color-text)',
-            }}>
-              {line || ' '}
+        {showFull ? (
+          <pre style={{ margin: 0, padding: '4px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--color-text)' }}>
+            {diff}
+          </pre>
+        ) : (
+          lines.map((line, i) => {
+            const isAdd = line.startsWith('+') && !line.startsWith('+++');
+            const isDel = line.startsWith('-') && !line.startsWith('---');
+            const isHdr = line.startsWith('@@') || line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++');
+            return (
+              <div key={i} style={{
+                padding: '1px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                background: isAdd ? 'rgba(16,185,129,0.12)' : isDel ? 'rgba(239,68,68,0.12)' : isHdr ? 'rgba(99,102,241,0.08)' : 'transparent',
+                color: isAdd ? '#34d399' : isDel ? '#f87171' : isHdr ? '#818cf8' : 'var(--color-text)',
+              }}>
+                {line || ' '}
+              </div>
+            );
+          })
+        )}
+        
+        {isTruncated && (
+          <div style={{ padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(245,158,11,0.05)' }}>
+            <div style={{ color: '#f59e0b', fontSize: 11 }}>
+              ⚠️ Diff truncated for performance — {allLines.length} total lines.
             </div>
-          );
-        })}
+            <button 
+              onClick={() => setShowFull(true)}
+              style={{ padding: '4px 8px', background: 'var(--color-surface-3)', border: '1px solid var(--color-border)', borderRadius: 4, color: 'var(--color-text)', cursor: 'pointer', fontSize: 11 }}
+            >
+              View Full Diff
+            </button>
+          </div>
+        )}
+        {showFull && allLines.length > 300 && (
+          <div style={{ padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.05)', textAlign: 'right' }}>
+            <button 
+              onClick={() => setShowFull(false)}
+              style={{ padding: '4px 8px', background: 'var(--color-surface-3)', border: '1px solid var(--color-border)', borderRadius: 4, color: 'var(--color-text)', cursor: 'pointer', fontSize: 11 }}
+            >
+              Collapse Diff
+            </button>
+          </div>
+        )}
         {lines.length === 0 && <div style={{ padding: '8px 12px', color: 'var(--color-text-muted)' }}>No changes</div>}
       </div>
+    </div>
+  );
+}
+
+function LazyDiffCard({ cf }: { cf: any }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ padding: 8, background: 'rgba(0,0,0,0.15)', borderRadius: 6 }}>
+      <div 
+        style={{ fontFamily: 'monospace', fontSize: 12, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+        onClick={() => setOpen(!open)}
+      >
+        <span>{cf.file}</span>
+        <span style={{ fontSize: 11, color: 'var(--color-accent)' }}>{open ? 'Hide Diff' : 'View Diff'}</span>
+      </div>
+      {open && <DiffBlock diff={cf.diff || ''} fileName={cf.file} />}
     </div>
   );
 }
@@ -320,17 +370,53 @@ function ChangedFilesStep({
         ))}
       </div>
 
-      {/* Per-file accordion */}
-      {result.optimized_files.length > 0 && (
-        <div className="card" style={{ marginBottom: 20 }}>
-          <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            OPTIMIZED FILES ({result.optimized_files.length})
-          </h3>
-          {result.optimized_files.map((f, i) => (
-            <ChangedFileCard key={f.file} f={f} idx={i} dryRun={!!dryRun} />
-          ))}
-        </div>
-      )}
+      {/* Per-file accordion segmented by status */}
+      {(() => {
+        const optimized = result.optimized_files.filter((f: any) => f.validation_status === 'PASSED');
+        const unchanged = result.optimized_files.filter((f: any) => f.validation_status === 'UNCHANGED');
+        const skipped = result.optimized_files.filter((f: any) => f.validation_status === 'SKIPPED');
+        const failed = result.optimized_files.filter((f: any) => f.validation_status === 'FAILED');
+
+        return (
+          <>
+            {optimized.length > 0 && (
+              <div className="card" style={{ marginBottom: 20 }}>
+                <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  OPTIMIZED FILES ({optimized.length})
+                </h3>
+                {optimized.map((f, i) => <ChangedFileCard key={f.file} f={f} idx={i} dryRun={!!dryRun} />)}
+              </div>
+            )}
+            
+            {unchanged.length > 0 && (
+              <div className="card" style={{ marginBottom: 20 }}>
+                <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  UNCHANGED FILES ({unchanged.length})
+                </h3>
+                {unchanged.map((f, i) => <ChangedFileCard key={f.file} f={f} idx={i} dryRun={!!dryRun} />)}
+              </div>
+            )}
+
+            {skipped.length > 0 && (
+              <div className="card" style={{ marginBottom: 20 }}>
+                <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  SKIPPED FILES ({skipped.length})
+                </h3>
+                {skipped.map((f, i) => <ChangedFileCard key={f.file} f={f} idx={i} dryRun={!!dryRun} />)}
+              </div>
+            )}
+
+            {failed.length > 0 && (
+              <div className="card" style={{ marginBottom: 20 }}>
+                <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  FAILED / ROLLED BACK FILES ({failed.length})
+                </h3>
+                {failed.map((f, i) => <ChangedFileCard key={f.file} f={f} idx={i} dryRun={!!dryRun} />)}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Skipped files */}
       {result.skipped_files.length > 0 && (
@@ -1340,7 +1426,7 @@ export default function Pipeline() {
       return;
     }
 
-    applyDependencyUpdates(workspacePath, projectId)
+    applyDependencyUpdates(workspacePath, projectId, Array.from(approvedDepIds))
       .then(res => setApplyResult(res.data))
       .catch(e => setError(e?.response?.data?.detail || e.message || 'Apply failed.'));
   }, [stage]);
@@ -1464,9 +1550,6 @@ export default function Pipeline() {
     const changedFiles: string[] = [];
     if (recipeRun?.recipes) {
       for (const r of recipeRun.recipes) {
-        for (const f of (r.files_targeted || [])) {
-          if (!changedFiles.includes(f)) changedFiles.push(f);
-        }
         for (const f of (r.files_actually_changed || [])) {
           if (!changedFiles.includes(f)) changedFiles.push(f);
         }
@@ -1815,10 +1898,7 @@ function VerifyRecipeChangesStep({
                 ) : (
                   <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {r.changed_files.map((cf: any) => (
-                      <div key={cf.file} style={{ padding: 8, background: 'rgba(0,0,0,0.15)', borderRadius: 6 }}>
-                        <div style={{ fontFamily: 'monospace', fontSize: 12, marginBottom: 6 }}>{cf.file}</div>
-                        <DiffBlock diff={cf.diff || ''} fileName={cf.file} />
-                      </div>
+                      <LazyDiffCard key={cf.file} cf={cf} />
                     ))}
                   </div>
                 )}

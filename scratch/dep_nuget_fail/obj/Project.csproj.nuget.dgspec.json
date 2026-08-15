@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\dep_nuget_fail\\Project.csproj": {}
+  },
+  "projects": {
+    "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\dep_nuget_fail\\Project.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\dep_nuget_fail\\Project.csproj",
+        "projectName": "Project",
+        "projectPath": "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\dep_nuget_fail\\Project.csproj",
+        "packagesPath": "C:\\Users\\bandi\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\bandi\\Desktop\\SystemaOps\\modernization-platform\\scratch\\dep_nuget_fail\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\bandi\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Fake.NonExistent.Package": {
+              "target": "Package",
+              "version": "[2.0.0, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.424/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
