@@ -600,8 +600,52 @@ class CSharpRoslynSyntaxTransformer:
                 pass
         return code
 
-    def transform_csproj(self, content: str, target_framework: str = "net8.0") -> str:
+    def transform_csproj(self, content: str, target_framework: str = "net8.0", packages_config_content: str = "") -> str:
         tf = target_framework if target_framework.startswith("net") else "net8.0"
+        import re
+
+        # Detect if project is legacy non-SDK (.NET Framework / old MSBuild)
+        is_legacy = (
+            "<Project ToolsVersion=" in content or
+            "<TargetFrameworkVersion>" in content or
+            "http://schemas.microsoft.com/developer/msbuild/2003" in content or
+            '<Project Sdk="Microsoft.NET.Sdk"' not in content
+        )
+
+        if is_legacy:
+            # Extract packages from packages.config if provided
+            packages = []
+            if packages_config_content:
+                for match in re.finditer(r'<package\s+id="([^"]+)"\s+version="([^"]+)"', packages_config_content, re.IGNORECASE):
+                    packages.append((match.group(1), match.group(2)))
+
+            # Extract any existing PackageReference from old content
+            for match in re.finditer(r'<PackageReference\s+(?:Include|Update)="([^"]+)"(?:\s+Version="([^"]+)")?', content, re.IGNORECASE):
+                pkg_name = match.group(1)
+                pkg_ver = match.group(2) or "latest"
+                if not any(p[0].lower() == pkg_name.lower() for p in packages):
+                    packages.append((pkg_name, pkg_ver))
+
+            # Build clean modern SDK-style project file
+            lines = [
+                '<Project Sdk="Microsoft.NET.Sdk">',
+                '  <PropertyGroup>',
+                f'    <TargetFramework>{tf}</TargetFramework>',
+                '    <Nullable>enable</Nullable>',
+                '    <ImplicitUsings>enable</ImplicitUsings>',
+                '  </PropertyGroup>',
+            ]
+
+            if packages:
+                lines.append('  <ItemGroup>')
+                for pkg_id, pkg_ver in packages:
+                    lines.append(f'    <PackageReference Include="{pkg_id}" Version="{pkg_ver}" />')
+                lines.append('  </ItemGroup>')
+
+            lines.append('</Project>')
+            return "\n".join(lines) + "\n"
+
+        # Already SDK-style: update TargetFramework
         result = re.sub(
             r"<TargetFramework>\s*[^<]+?\s*</TargetFramework>",
             f"<TargetFramework>{tf}</TargetFramework>",
@@ -756,13 +800,21 @@ class CSharpRoslynAdapter(MigrationAdapter):
                         ))
         timeline.append({"step": "Roslyn AST syntax modernization", "status": "completed", "ts": datetime.datetime.utcnow().isoformat()})
 
-        # 2. .csproj TargetFramework Upgrade
+        # 2. .csproj TargetFramework & SDK-Style Upgrade
         for csproj in ws.rglob("*.csproj"):
             if is_ignored_path(csproj):
                 continue
             try:
                 orig_proj = csproj.read_text(encoding="utf-8", errors="replace")
-                new_proj = transformer.transform_csproj(orig_proj, target_version)
+
+                # Check for packages.config in same folder or root
+                pkg_config = csproj.parent / "packages.config"
+                if not pkg_config.exists():
+                    pkg_config = ws / "packages.config"
+
+                pkg_config_content = pkg_config.read_text(encoding="utf-8", errors="replace") if pkg_config.exists() else ""
+
+                new_proj = transformer.transform_csproj(orig_proj, target_version, pkg_config_content)
                 if new_proj != orig_proj:
                     csproj.write_text(new_proj, encoding="utf-8")
                     rel = str(csproj.relative_to(ws))
@@ -776,8 +828,8 @@ class CSharpRoslynAdapter(MigrationAdapter):
                             orig_proj.splitlines(keepends=True),
                             new_proj.splitlines(keepends=True),
                             fromfile=f"a/{rel}", tofile=f"b/{rel}")),
-                        changes=[{"type": "DOTNET_TARGET_FRAMEWORK_UPGRADE",
-                                  "description": f"Upgraded TargetFramework to {target_version}"}],
+                        changes=[{"type": "DOTNET_SDK_PROJECT_UPGRADE",
+                                  "description": f"Upgraded to modern SDK-style project targeting {target_version}"}],
                     ))
             except Exception:
                 pass

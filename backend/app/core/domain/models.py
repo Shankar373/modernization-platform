@@ -90,6 +90,34 @@ class DetectedDependency(BaseModel):
     scope: Optional[str] = None
 
 
+class DocItem(BaseModel):
+    """Metadata and extracted signals from a single documentation or README file."""
+    path: str
+    file_name: str
+    is_root: bool = True
+    content_preview: str = ""
+    build_commands: List[str] = []
+    run_commands: List[str] = []
+    test_commands: List[str] = []
+    detected_servers: List[str] = []
+    detected_databases: List[str] = []
+    environment_variables: List[str] = []
+    prerequisites: List[str] = []
+
+
+class DetectedDocumentation(BaseModel):
+    """Aggregated documentation signals across root and monorepo subprojects."""
+    primary_readme: Optional[DocItem] = None
+    subproject_readmes: List[DocItem] = []
+    all_build_commands: List[str] = []
+    all_run_commands: List[str] = []
+    all_test_commands: List[str] = []
+    all_servers: List[str] = []
+    all_databases: List[str] = []
+    all_env_vars: List[str] = []
+    total_docs_found: int = 0
+
+
 # ── Technology Fingerprint ────────────────────────────────────────────────────
 
 class TechnologyProfile(BaseModel):
@@ -104,6 +132,8 @@ class TechnologyProfile(BaseModel):
     databases: List[str] = []
     testing_frameworks: List[str] = []
     frontend_technologies: List[str] = []
+
+    documentation: Optional[DetectedDocumentation] = None
 
     file_count: int = 0
     total_lines: int = 0

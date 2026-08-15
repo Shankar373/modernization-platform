@@ -125,6 +125,18 @@ class LLMService:
             }
             for r in recipes
         ]
+        # Include documentation signals in project profile if provided
+        doc_info = profile.get("documentation")
+        if doc_info and isinstance(doc_info, dict):
+            profile["readme_insights"] = {
+                "servers": doc_info.get("all_servers", []),
+                "databases": doc_info.get("all_databases", []),
+                "build_commands": doc_info.get("all_build_commands", [])[:5],
+                "run_commands": doc_info.get("all_run_commands", [])[:5],
+                "test_commands": doc_info.get("all_test_commands", [])[:5],
+                "env_vars": doc_info.get("all_env_vars", [])[:10],
+            }
+
         return json.dumps(
             {
                 "project_profile": profile,
@@ -180,9 +192,28 @@ class LLMService:
         if not isinstance(data, list):
             return []
 
+        def _norm_l(l: str) -> str:
+            cleaned = str(l).strip().lower()
+            if cleaned in ("c#", "csharp", "vb.net", "f#", "dotnet", ".net"):
+                return "csharp"
+            if cleaned in ("js", "javascript", "node", "nodejs"):
+                return "javascript"
+            if cleaned in ("ts", "typescript"):
+                return "typescript"
+            if cleaned in ("py", "python"):
+                return "python"
+            return cleaned
+
         # Get recipe-to-language mapping from available_recipes
-        recipe_langs = {r["id"]: r.get("language", "all").lower() for r in available_recipes}
-        project_langs = {lang.lower() for lang in project_profile.get("languages", [])}
+        recipe_langs = {r["id"]: _norm_l(r.get("language", "all")) for r in available_recipes}
+        
+        raw_pl = project_profile.get("languages", [])
+        project_langs = set()
+        for item in raw_pl:
+            if isinstance(item, dict):
+                project_langs.add(_norm_l(item.get("name", "")))
+            elif isinstance(item, str):
+                project_langs.add(_norm_l(item))
 
         executable_set = set(executable_ids)
         validated: List[Dict[str, Any]] = []
@@ -199,7 +230,7 @@ class LLMService:
             if recipe_lang not in ("all", "generic", "yaml", "json", "docker", "ci", "cd"):
                 compatible = False
                 for pl in project_langs:
-                    if pl in recipe_lang or recipe_lang in pl:
+                    if pl == recipe_lang or pl in recipe_lang or recipe_lang in pl:
                         compatible = True
                         break
                 if not compatible:

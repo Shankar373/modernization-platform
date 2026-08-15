@@ -21,6 +21,8 @@ from app.core.domain.models import (
     DetectedLanguage,
     DetectionEvidence,
     TechnologyProfile,
+    DocItem,
+    DetectedDocumentation,
 )
 
 
@@ -269,6 +271,7 @@ class UniversalScanner:
         profile.testing_frameworks = self._detect_testing_frameworks(ws, files)
         profile.databases = self._detect_databases(ws, files)
         profile.frontend_technologies = self._detect_frontend(ws, files)
+        profile.documentation = self._scan_documentation(ws, files)
         profile.is_multi_language = len(profile.languages) > 1
 
         return profile
@@ -918,3 +921,193 @@ class UniversalScanner:
             except Exception:
                 pass
         return found
+
+
+    def _scan_documentation(self, ws: Path, files: List[Path]) -> Optional[DetectedDocumentation]:
+        """
+        Scan workspace for README and documentation files across root and monorepo subprojects.
+        Extracts structured signals: build commands, run commands, test commands,
+        target servers, databases, and environment variables.
+        """
+        doc_names = {"readme.md", "readme.txt", "readme.rst", "readme", "readme.markdown",
+                     "install.md", "architecture.md", "contributing.md"}
+        
+        # Find all doc files within workspace
+        found_docs: List[Path] = []
+        for f in files:
+            if f.name.lower() in doc_names:
+                found_docs.append(f)
+                
+        # Also check root specifically in case it wasn't captured
+        for cand in doc_names:
+            p = ws / cand
+            if p.exists() and p.is_file() and p not in found_docs and not self._is_ignored(p):
+                found_docs.append(p)
+
+        if not found_docs:
+            return None
+
+        # Sort: root docs first, then by path length
+        def _doc_sort_key(p: Path) -> tuple:
+            try:
+                rel = p.relative_to(ws)
+                is_root = len(rel.parts) == 1
+                return (0 if is_root else 1, len(rel.parts), str(rel).lower())
+            except Exception:
+                return (2, 99, str(p).lower())
+
+        found_docs.sort(key=_doc_sort_key)
+
+        doc_items: List[DocItem] = []
+        all_build = set()
+        all_run = set()
+        all_test = set()
+        all_servers = set()
+        all_databases = set()
+        all_env_vars = set()
+
+        server_keywords = {
+            "iis": "IIS",
+            "kestrel": "Kestrel",
+            "tomcat": "Apache Tomcat",
+            "apache tomcat": "Apache Tomcat",
+            "nginx": "Nginx",
+            "apache": "Apache HTTP Server",
+            "gunicorn": "Gunicorn",
+            "uvicorn": "Uvicorn",
+            "docker": "Docker",
+            "docker-compose": "Docker Compose",
+            "kubernetes": "Kubernetes",
+            "k8s": "Kubernetes",
+            "azure app service": "Azure App Service",
+            "azure": "Azure",
+            "aws": "AWS",
+            "elastic beanstalk": "AWS Elastic Beanstalk",
+            "websphere": "IBM WebSphere",
+            "weblogic": "Oracle WebLogic",
+            "wildfly": "WildFly / JBoss",
+            "jboss": "JBoss",
+        }
+
+        db_keywords = {
+            "sql server": "SQL Server",
+            "mssql": "SQL Server",
+            "postgresql": "PostgreSQL",
+            "postgres": "PostgreSQL",
+            "mysql": "MySQL",
+            "sqlite": "SQLite",
+            "oracle": "Oracle",
+            "mongodb": "MongoDB",
+            "redis": "Redis",
+            "rabbitmq": "RabbitMQ",
+            "kafka": "Kafka",
+        }
+
+        # Regex patterns for command extraction in code blocks and bash/cmd snippets
+        cmd_patterns = [
+            r"```(?:bash|sh|cmd|powershell|ps1|shell|console)?\s*\n([\s\S]*?)\n```",
+            r"(?:^|\n)\s*(?:[$>]|PS>)\s*([^\n]+)",
+        ]
+
+        # Scan up to 10 doc files (root + top monorepo packages)
+        for doc_file in found_docs[:10]:
+            try:
+                rel_path = str(doc_file.relative_to(ws)).replace("\\", "/")
+            except Exception:
+                rel_path = doc_file.name
+
+            is_root = "/" not in rel_path and "\\" not in rel_path
+
+            try:
+                content = doc_file.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+
+            # Preview cap (50KB)
+            preview = content[:50000]
+
+            # 1. Extract commands from code blocks
+            build_cmds = []
+            run_cmds = []
+            test_cmds = []
+
+            extracted_lines = []
+            for pat in cmd_patterns:
+                for match in re.findall(pat, content, re.MULTILINE):
+                    for line in match.splitlines():
+                        line_clean = line.strip()
+                        if line_clean and not line_clean.startswith("#") and not line_clean.startswith("//"):
+                            line_clean = re.sub(r"^[$>]+\s*", "", line_clean).strip()
+                            if line_clean:
+                                extracted_lines.append(line_clean)
+
+            # Categorize extracted command lines
+            for cmd in extracted_lines:
+                cmd_lower = cmd.lower()
+                if any(k in cmd_lower for k in ["build", "compile", "make", "msbuild", "mvn clean", "mvn package", "gradle assemble", "dotnet publish", "cargo build", "npm run build", "yarn build"]):
+                    build_cmds.append(cmd)
+                    all_build.add(cmd)
+                elif any(k in cmd_lower for k in ["test", "pytest", "npm test", "yarn test", "mvn test", "dotnet test", "cargo test", "ctest"]):
+                    test_cmds.append(cmd)
+                    all_test.add(cmd)
+                elif any(k in cmd_lower for k in ["run", "start", "serve", "dotnet run", "npm start", "yarn start", "python main", "python app", "uvicorn", "gunicorn", "docker run", "docker-compose up", "flask run"]):
+                    run_cmds.append(cmd)
+                    all_run.add(cmd)
+
+            # 2. Extract server mentions
+            doc_servers = []
+            content_lower = content.lower()
+            for kw, norm_name in server_keywords.items():
+                # Word boundary match to prevent substrings
+                if re.search(r"\b" + re.escape(kw) + r"\b", content_lower):
+                    if norm_name not in doc_servers:
+                        doc_servers.append(norm_name)
+                    all_servers.add(norm_name)
+
+            # 3. Extract database mentions
+            doc_dbs = []
+            for kw, norm_name in db_keywords.items():
+                if re.search(r"\b" + re.escape(kw) + r"\b", content_lower):
+                    if norm_name not in doc_dbs:
+                        doc_dbs.append(norm_name)
+                    all_databases.add(norm_name)
+
+            # 4. Extract environment variables (e.g. PORT=8080, DATABASE_URL, etc.)
+            env_vars = []
+            for m in re.findall(r"\b([A-Z][A-Z0-9_]{3,})\s*(?:=|[A-Za-z0-9_:/.-]+)", content):
+                if m not in {"HTTP", "HTTPS", "TRUE", "FALSE", "NULL", "NONE", "JSON", "POST", "GET", "PUT", "DELETE", "README"}:
+                    if m not in env_vars:
+                        env_vars.append(m)
+                    all_env_vars.add(m)
+
+            item = DocItem(
+                path=rel_path,
+                file_name=doc_file.name,
+                is_root=is_root,
+                content_preview=preview,
+                build_commands=build_cmds[:10],
+                run_commands=run_cmds[:10],
+                test_commands=test_cmds[:10],
+                detected_servers=doc_servers,
+                detected_databases=doc_dbs,
+                environment_variables=env_vars[:20],
+            )
+            doc_items.append(item)
+
+        if not doc_items:
+            return None
+
+        primary = doc_items[0]
+        subprojects = doc_items[1:] if len(doc_items) > 1 else []
+
+        return DetectedDocumentation(
+            primary_readme=primary,
+            subproject_readmes=subprojects,
+            all_build_commands=sorted(list(all_build)),
+            all_run_commands=sorted(list(all_run)),
+            all_test_commands=sorted(list(all_test)),
+            all_servers=sorted(list(all_servers)),
+            all_databases=sorted(list(all_databases)),
+            all_env_vars=sorted(list(all_env_vars)),
+            total_docs_found=len(found_docs),
+        )

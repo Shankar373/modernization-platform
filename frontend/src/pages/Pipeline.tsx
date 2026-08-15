@@ -1917,6 +1917,7 @@ function VerifyRecipeChangesStep({
   );
 }
 
+
 function FinalValidationStep({
   workspacePath, projectId, onFinish
 }: {
@@ -1953,33 +1954,127 @@ function FinalValidationStep({
     );
   }
 
-  return (
-    <div className="animate-fade-up" style={{ textAlign: 'center', padding: 40 }}>
-      <div style={{ fontSize: 64, marginBottom: 20 }}>🎉</div>
-      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12, color: 'var(--color-success)' }}>
-        Migration Completed Successfully
-      </h2>
-      <p style={{ color: 'var(--color-text-muted)', fontSize: 14, maxWidth: 600, margin: '0 auto 24px auto', lineHeight: 1.6 }}>
-        Every recipe transformation and optimization has been verified. The modernized codebase successfully compiled, passed all regression tests, and matches Git boundary constraints.
-      </p>
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'PASS': return '#10b981';
+      case 'PRE_EXISTING_FAILURE': return '#f59e0b';
+      case 'ENVIRONMENT_BLOCKED': return '#8b5cf6';
+      case 'NOT_APPLICABLE': return '#6b7280';
+      case 'SKIPPED': return '#6b7280';
+      default: return '#ef4444'; // FAIL, MODERNIZATION_REGRESSION, OPTIMIZATION_REGRESSION
+    }
+  };
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, maxWidth: 400, margin: '0 auto 32px auto' }}>
-        <div className="card" style={{ flex: 1, padding: 16 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-success)' }}>PASSED</div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>Build Compilation</div>
-        </div>
-        <div className="card" style={{ flex: 1, padding: 16 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-success)' }}>PASSED</div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>Regression Tests</div>
-        </div>
+  const getStatusEmoji = (status: string) => {
+    switch (status) {
+      case 'PASS': return '✅';
+      case 'PRE_EXISTING_FAILURE': return '⚠️';
+      case 'ENVIRONMENT_BLOCKED': return '🔒';
+      case 'NOT_APPLICABLE': return '➖';
+      case 'SKIPPED': return '⏭️';
+      default: return '❌';
+    }
+  };
+
+  const hasRegressions = valResult.validation_stats && (valResult.validation_stats.mod_regressions + valResult.validation_stats.opt_regressions > 0);
+  const isEnvBlocked = valResult.validation_stats && (valResult.validation_stats.environment_blocked > 0);
+  const isPreExisting = valResult.validation_stats && (valResult.validation_stats.pre_existing > 0);
+
+  const headerTitle = valResult.success 
+    ? 'Migration Completed Successfully'
+    : hasRegressions 
+      ? 'Validation Found Regressions'
+      : isEnvBlocked 
+        ? 'Environment Prerequisite Required'
+        : isPreExisting 
+          ? 'Pre-Existing Baseline Issues Detected'
+          : 'Validation Completed with Warnings';
+
+  const headerSubtitle = valResult.success 
+    ? 'The modernized codebase has been fully verified across all detected projects and nested solutions.'
+    : hasRegressions 
+      ? 'The modernized codebase introduced regressions that were not present in the baseline.'
+      : isEnvBlocked 
+        ? 'Code modernization succeeded, but host compilation/test verification was blocked due to missing local tools (e.g., pytest, pnpm).'
+        : 'Modernization completed. Review project-specific validation results below.';
+
+  const headerColor = valResult.success 
+    ? 'var(--color-success)' 
+    : hasRegressions 
+      ? 'var(--color-error)' 
+      : isEnvBlocked 
+        ? '#8b5cf6' 
+        : 'var(--color-warning)';
+
+  return (
+    <div className="animate-fade-up" style={{ padding: 40 }}>
+      <div style={{ textAlign: 'center', marginBottom: 32 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>{valResult.success ? '🎉' : hasRegressions ? '❌' : isEnvBlocked ? '🔒' : '⚠️'}</div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12, color: headerColor }}>
+          {headerTitle}
+        </h2>
+        <p style={{ color: 'var(--color-text-muted)', fontSize: 14, maxWidth: 600, margin: '0 auto' }}>
+          {headerSubtitle}
+        </p>
       </div>
 
-      {valResult.build_output && (
-        <div style={{ maxWidth: 600, margin: '0 auto 24px auto', textAlign: 'left' }}>
-          <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Validation Output Summary:</span>
-          <pre style={{ marginTop: 8, padding: 12, background: 'var(--color-surface-2)', borderRadius: 6, fontSize: 11, fontFamily: 'monospace', overflowX: 'auto', maxHeight: 150 }}>
-            {valResult.build_output}
-          </pre>
+      {valResult.validation_stats && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 12, marginBottom: 24, textAlign: 'center' }}>
+            <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 'bold' }}>{valResult.validation_stats.total}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Projects Found</div>
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 'bold', color: '#10b981' }}>{valResult.validation_stats.passed}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Passed</div>
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 'bold', color: '#ef4444' }}>{valResult.validation_stats.mod_regressions + valResult.validation_stats.opt_regressions}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Regressions</div>
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 'bold', color: '#f59e0b' }}>{valResult.validation_stats.pre_existing}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Pre-Existing Fails</div>
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 'bold', color: '#8b5cf6' }}>{valResult.validation_stats.environment_blocked}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Env Blocked</div>
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 'bold', color: '#6b7280' }}>{valResult.validation_stats.not_applicable}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>N/A</div>
+            </div>
+        </div>
+      )}
+
+      {valResult.validation_results && valResult.validation_results.length > 0 && (
+        <div className="card" style={{ marginBottom: 32 }}>
+          <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>DETAILED PROJECT VALIDATION</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {valResult.validation_results.map((r: any, idx: number) => (
+              <div key={idx} style={{ padding: '12px 16px', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)', borderRadius: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 16 }}>{getStatusEmoji(r.status)}</span>
+                      <strong style={{ fontSize: 14 }}>{r.project}</strong>
+                      <span style={{ fontSize: 11, color: 'var(--color-text-muted)', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>{r.project_type}</span>
+                    </div>
+                    <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--color-text-muted)', paddingLeft: 28 }}>
+                      $ {r.command}
+                    </div>
+                  </div>
+                  <Badge text={r.status.replace(/_/g, ' ')} color={getStatusColor(r.status)} />
+                </div>
+                {(r.category || (r.exit_code !== null && r.exit_code !== 0)) && (
+                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)', paddingLeft: 28, marginTop: 8 }}>
+                        {r.category && <span style={{ marginRight: 16 }}><strong>Category:</strong> {r.category}</span>}
+                        {r.exit_code !== null && <span><strong>Exit Code:</strong> {r.exit_code}</span>}
+                    </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

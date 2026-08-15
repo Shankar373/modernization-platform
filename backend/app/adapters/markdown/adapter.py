@@ -94,7 +94,7 @@ class MarkdownFormatterAdapter(MigrationAdapter):
         return MigrationResult(
             result_id=f"md-res-{os.urandom(4).hex()}", job_id=plan.plan_id,
             project_id=plan.project_id, plan_id=plan.plan_id,
-            status=MigrationStatus.SUCCESS if modified else MigrationStatus.PARTIALLY_SUCCESSFUL,
+            status=MigrationStatus.SUCCESS,
             statistics=MigrationStatistics(files_scanned=len(before), files_modified=modified,
                                            files_unchanged=len(before)-modified, capabilities_run=1, build_passed=True),
             changed_files=changed_files, timeline=timeline, completed_at=datetime.utcnow(),

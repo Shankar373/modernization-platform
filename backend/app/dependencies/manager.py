@@ -69,13 +69,13 @@ class DependencyUpdateManager:
         
         for pm, updates in by_manager.items():
             try:
-                if pm == "npm":
+                if pm in ("npm", "node"):
                     res, changed = update_npm(workspace_path, updates)
                 elif pm in ("pip", "poetry", "python"):
                     res, changed = update_pip(workspace_path, updates)
-                elif pm == "nuget":
+                elif pm in ("nuget", "dotnet"):
                     res, changed = update_nuget(workspace_path, updates)
-                elif pm == "maven":
+                elif pm in ("maven", "java", "gradle"):
                     res, changed = update_maven(workspace_path, updates)
                 else:
                     for u in updates:
@@ -89,7 +89,7 @@ class DependencyUpdateManager:
                     res = []
                     global_success = False
                     
-                if pm in ("npm", "pip", "poetry", "python", "nuget", "maven"):
+                if pm in ("npm", "node", "pip", "poetry", "python", "nuget", "dotnet", "maven", "java", "gradle"):
                     results.extend(res)
                     for c in changed:
                         files_changed.add(c)
@@ -158,3 +158,4 @@ class DependencyUpdateManager:
             results=results,
             files_changed=list(files_changed)
         )
+

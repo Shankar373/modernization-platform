@@ -198,23 +198,36 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
 
     def create_plan(
         self,
-        workspace_path: str,
-        profile: TechnologyProfile,
-        target_version: str,
-        migration_profile: MigrationProfile = MigrationProfile.CONSERVATIVE,
+        workspace_path_or_profile=None,
+        profile: Optional[TechnologyProfile] = None,
+        target_version: str = "17",
+        migration_profile: MigrationProfile = MigrationProfile.STANDARD,
+        **kwargs
     ) -> MigrationPlan:
         """Dynamically select recipes based on source tech, target, deps, and policy."""
-        analysis = self.analyze(profile)
-        source_version = analysis.metadata.get("detected_version", "8")
-        frameworks = analysis.metadata.get("frameworks", [])
+        if isinstance(workspace_path_or_profile, TechnologyProfile):
+            actual_profile = workspace_path_or_profile
+            actual_target = target_version or kwargs.get("target_version", "17")
+            actual_mig_profile = profile if isinstance(profile, MigrationProfile) else migration_profile
+        else:
+            actual_profile = profile or TechnologyProfile(
+                profile_id="java-proj", project_id="java-proj",
+                languages=[], frameworks=[], build_systems=[], dependencies=[]
+            )
+            actual_target = target_version
+            actual_mig_profile = migration_profile
+
+        analysis = self.analyze(actual_profile)
+        source_version = analysis.metadata.get("detected_version", "8") if analysis.metadata else "8"
+        frameworks = analysis.metadata.get("frameworks", []) if analysis.metadata else []
 
         catalog = RecipeCatalog()
         selected_recipes = catalog.select_recipes(
             source_version=source_version,
-            target_version=target_version,
+            target_version=actual_target,
             frameworks=frameworks,
-            dependencies=[d.name for d in profile.dependencies if d.language.lower() == "java"],
-            migration_profile=migration_profile,
+            dependencies=[d.name for d in actual_profile.dependencies if d.language.lower() == "java"],
+            migration_profile=actual_mig_profile,
         )
 
         steps = []
@@ -233,14 +246,14 @@ class JavaOpenRewriteAdapter(MigrationAdapter):
         target = MigrationTarget(
             language="java",
             source_version=source_version,
-            target_version=target_version,
+            target_version=actual_target,
         )
         if frameworks:
             target.framework_source = frameworks[0] if frameworks else None
 
         return MigrationPlan(
-            project_id=profile.profile_id,
-            profile=migration_profile,
+            project_id=actual_profile.profile_id,
+            profile=actual_mig_profile,
             targets=[target],
             steps=steps,
             selected_capabilities=[r["capability"] for r in selected_recipes],

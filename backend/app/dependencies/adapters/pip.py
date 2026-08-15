@@ -1,3 +1,4 @@
+import os
 import subprocess
 import re
 from pathlib import Path
@@ -116,7 +117,10 @@ def update_pip(workspace_path: str, updates: List[DependencyUpdate]) -> Tuple[Li
             ))
 
     try:
-        res_test = subprocess.run("pytest", cwd=workspace_path, shell=True, capture_output=True, text=True)
+        env = os.environ.copy()
+        ws_res = str(Path(workspace_path).resolve())
+        env["PYTHONPATH"] = ws_res + (os.pathsep + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
+        res_test = subprocess.run("pytest", cwd=workspace_path, shell=True, capture_output=True, text=True, env=env)
         if res_test.returncode != 0 and "not recognized" not in res_test.stderr and "not found" not in res_test.stderr:
             for u in updates:
                 if not any(r.update.package == u.package for r in results):

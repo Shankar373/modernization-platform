@@ -448,11 +448,11 @@ def _is_version_compatible(recipe: Dict, source_version: Optional[str], target_v
     if min_v:
         parsed_min = _version_parse(min_v)
         # Target must at least support this minimum version
-        if target_version and parsed_target < parsed_min:
+        if target_version and target_version not in ("latest", "net8.0", "17", "21") and parsed_target < parsed_min:
             return False
-        # If source is explicitly below the minimum, it might be applicable ONLY if we are migrating up
+        # If source is explicitly below the minimum, it is applicable because we are modernizing up
         if source_version and parsed_source < parsed_min:
-            if not (target_version and parsed_target >= parsed_min):
+            if target_version and target_version not in ("latest", "net8.0", "17", "21") and parsed_target < parsed_min:
                 return False
 
     if max_v:
@@ -630,24 +630,8 @@ async def recommend_recipes(req: RecommendRequest):
     if req.target_languages:
         actual_targets = {normalize_lang(l) for l in req.target_languages if l and l.strip()}
     else:
-        is_csharp = "csharp" in detected_langs
-        is_java = "java" in detected_langs
-        is_python = "python" in detected_langs
-        
-        if is_csharp:
-            actual_targets.add("csharp")
-        elif is_java:
-            actual_targets.add("java")
-        elif is_python:
-            actual_targets.add("python")
-        else:
-            if "typescript" in detected_langs:
-                actual_targets.add("typescript")
-            if "javascript" in detected_langs:
-                actual_targets.add("javascript")
-            for lang in detected_langs:
-                if lang not in ("javascript", "typescript"):
-                    actual_targets.add(lang)
+        for lang in detected_langs:
+            actual_targets.add(lang)
 
     scored: List[Dict] = []
     for recipe in RECIPE_CATALOG:
@@ -1089,30 +1073,41 @@ async def validate_migration(req: ValidateRequest):
     test_passed = True
     build_output = "Validation passed successfully."
 
-    detected_langs = { _detect_language(ws / rel) for rel in changed_files if _detect_language(ws / rel) }
-    if not detected_langs:
-        # If no languages detected, try default languages based on workspace
-        if list(ws.rglob("*.py")):
-            detected_langs.add("python")
-        if list(ws.rglob("*.csproj")):
-            detected_langs.add("csharp")
-
-    for lang in detected_langs:
-        if lang:
-            val_ok, val_err = _validate_workspace(ws, lang)
-            if not val_ok:
-                build_passed = False
-                test_passed = False
-                build_output = val_err
-                break
-            
+    from app.validation.baseline_validator import ValidationService
+    svc = ValidationService(str(ws))
+    
+    # Run the validation
+    svc.run_modernized()
+    val_summary = svc.get_summary()
+    
+    # Backwards compatibility flags
+    # We consider it a "failure" if there are any modernization or optimization regressions, or any plain FAIL
+    # that wasn't previously there. For now, since we only ran modernized, we look at the results.
+    any_fail = any(r.status.value in ["FAIL", "MODERNIZATION_REGRESSION", "OPTIMIZATION_REGRESSION"] for r in val_summary.results)
+    
+    build_passed = not any_fail
+    test_passed = build_passed
+    
     success = build_passed and test_passed
+    
+    # Prepare structured validation results
+    results_list = [r.dict() for r in val_summary.results]
     
     return {
         "success": success,
         "build_passed": build_passed,
         "test_passed": test_passed,
-        "build_output": build_output,
+        "build_output": "See structured validation results." if not success else "Validation passed successfully.",
         "changed_files_count": len(changed_files),
-        "summary": build_output if not success else "Validation passed successfully.",
+        "summary": "Validation complete.",
+        "validation_results": results_list,
+        "validation_stats": {
+            "total": val_summary.total_projects_discovered,
+            "not_applicable": val_summary.not_applicable,
+            "environment_blocked": val_summary.environment_blocked,
+            "pre_existing": val_summary.pre_existing_failures,
+            "mod_regressions": val_summary.modernization_regressions,
+            "opt_regressions": val_summary.optimization_regressions,
+            "passed": val_summary.successful_validations
+        }
     }

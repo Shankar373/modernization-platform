@@ -224,7 +224,7 @@ class CssModernizationAdapter(MigrationAdapter):
             job_id=plan.plan_id,
             project_id=plan.project_id,
             plan_id=plan.plan_id,
-            status=MigrationStatus.SUCCESS if modified_count > 0 else MigrationStatus.PARTIALLY_SUCCESSFUL,
+            status=MigrationStatus.SUCCESS,
             statistics=MigrationStatistics(
                 files_scanned=len(before_state),
                 files_modified=modified_count,

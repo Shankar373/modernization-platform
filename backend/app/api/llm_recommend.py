@@ -33,6 +33,7 @@ class LLMRecommendRequest(BaseModel):
     source_version: Optional[str] = None
     target_version: Optional[str] = None
     file_counts: Dict[str, int] = Field(default_factory=dict)
+    documentation: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -74,6 +75,7 @@ async def llm_recommend_recipes(req: LLMRecommendRequest):
             for d in (req.dependencies or [])[:30]
         ],
         "security_findings": (req.security_findings or [])[:10],
+        "documentation": req.documentation,
         "metadata": req.metadata,
     }
 
