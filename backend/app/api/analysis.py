@@ -50,12 +50,23 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
                 **cached,
             }
 
+        # Look for saved project name
+        proj_name = ""
+        try:
+            name_file = Path(request.workspace_path) / ".project_name"
+            if name_file.exists():
+                proj_name = name_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+
         # Run the blocking scan OFF the event loop thread (fixes Windows WinError 64)
         def _do_scan():
             profile = _orchestrator.scan(request.workspace_path)
             return _orchestrator.get_assessment(request.workspace_path, profile)
 
         assessment = await asyncio.to_thread(_do_scan)
+        if proj_name:
+            assessment["project_name"] = proj_name
 
         # Cache for subsequent calls
         _analysis_cache[cache_key] = assessment

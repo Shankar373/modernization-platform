@@ -296,7 +296,7 @@ describe('Pipeline Multi-Step Wizard', () => {
     // 16. Wait for transition to Final Validation complete screen
     await waitFor(() => {
       expect(screen.getByText('Migration Completed Successfully')).toBeInTheDocument();
-      expect(screen.getByText('Build Compilation')).toBeInTheDocument();
+      expect(screen.getByText(/fully verified across all detected projects/)).toBeInTheDocument();
     }, { timeout: 8000 });
 
     // 17. Finish Migration to go to the final Git Checkpoint done screen

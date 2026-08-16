@@ -12,6 +12,7 @@ import Results from './pages/Results';
 import CodeChanges from './pages/CodeChanges';
 import History from './pages/History';
 import DependencyAnalysisPage from './pages/DependencyAnalysis';
+import ActiveMigrationBanner from './components/ActiveMigrationBanner';
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ export default function App() {
               <span className="user-badge">SystemaOps Discuss Integration</span>
             </div>
           </header>
+          <ActiveMigrationBanner />
 
           <div className="app-shell">
             <aside className="sidebar">

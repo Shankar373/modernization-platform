@@ -43,6 +43,31 @@ def classify_error(output: str, project_type: str) -> FailureCategory:
 def run_validation(project: ProjectManifest, cmd_def: ValidationCommand, workspace_root: str) -> ValidationResult:
     abs_wd = Path(workspace_root) / cmd_def.working_directory
     
+    # Auto-restore node_modules if missing
+    if project.project_type == "node" and not (abs_wd / "node_modules").exists() and not (Path(workspace_root) / "node_modules").exists():
+        restore_tool = "pnpm.cmd" if (project.package_manager == "pnpm" and is_tool_available("pnpm.cmd", abs_wd)) else ("npm.cmd" if os.name == "nt" else "npm")
+        if is_tool_available(restore_tool, abs_wd):
+            try:
+                subprocess.run(
+                    [restore_tool, "install"],
+                    cwd=str(abs_wd),
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+            except Exception:
+                pass
+
+        if not (abs_wd / "node_modules").exists() and not (Path(workspace_root) / "node_modules").exists():
+            return ValidationResult(
+                project=project.project_id,
+                project_type=project.project_type,
+                command=" ".join(cmd_def.command),
+                status=ValidationStatus.ENVIRONMENT_BLOCKED,
+                category=FailureCategory.ENVIRONMENT,
+                message="Node.js dependencies ('node_modules') could not be automatically restored in sandbox."
+            )
+    
     if not is_tool_available(cmd_def.tool, abs_wd):
         return ValidationResult(
             project=project.project_id,

@@ -223,3 +223,17 @@ export const optimizeCode = (data: {
 
 export const validateMigration = (workspacePath: string, projectId: string) =>
   API.post('/recipes/validate', { workspace_path: workspacePath, project_id: projectId });
+/**
+ * Remediate modernization failures via the AI Self-Healing Loop:
+ * Rolls back to the Git Checkpoint and recommends an adjusted recipe plan.
+ */
+export const remediateFailure = (data: {
+  project_id: string;
+  workspace_path: string;
+  failed_stage: string;
+  error_message: string;
+  failed_files?: string[];
+  executed_recipes?: string[];
+  attempt_number?: number;
+  max_retries?: number;
+}) => API.post('/recipes/remediate-failure', data);

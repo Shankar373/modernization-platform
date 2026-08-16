@@ -61,3 +61,6 @@ coverage.xml
 
 # Alembic
 backend/alembic.ini
+
+# Scratch directory
+scratch/

@@ -1,0 +1,14 @@
+---
+name: typescript-modernization
+language: typescript
+provider: ts-morph
+status: AVAILABLE
+source_versions:
+  - "TypeScript 3.x"
+  - "TypeScript 4.x"
+target_versions:
+  - "TypeScript 5.x"
+  - "ES2022"
+  - "ESNext"
+risk: LOW
+description: "TypeScript AST modernizer, modern module resolution, type safety enhancements, and package.json alignments."

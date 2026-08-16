@@ -96,6 +96,7 @@ class DocItem(BaseModel):
     file_name: str
     is_root: bool = True
     content_preview: str = ""
+    install_commands: List[str] = []
     build_commands: List[str] = []
     run_commands: List[str] = []
     test_commands: List[str] = []
@@ -109,6 +110,7 @@ class DetectedDocumentation(BaseModel):
     """Aggregated documentation signals across root and monorepo subprojects."""
     primary_readme: Optional[DocItem] = None
     subproject_readmes: List[DocItem] = []
+    all_install_commands: List[str] = []
     all_build_commands: List[str] = []
     all_run_commands: List[str] = []
     all_test_commands: List[str] = []

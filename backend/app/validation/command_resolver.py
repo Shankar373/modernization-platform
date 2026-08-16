@@ -1,3 +1,4 @@
+import sys
 import json
 import os
 from pathlib import Path
@@ -66,7 +67,7 @@ def resolve_commands(project_map: ProjectMap) -> ProjectMap:
                     pass
                 
             if has_tests:
-                test_cmds.append(ValidationCommand(command=["pytest"], working_directory=project.project_root, command_type="test", tool="pytest"))
+                test_cmds.append(ValidationCommand(command=[sys.executable, "-m", "pytest"], working_directory=project.project_root, command_type="test", tool="python"))
                 
         elif project.project_type == "java":
             tool = "mvn.cmd" if os.name == "nt" else "mvn"

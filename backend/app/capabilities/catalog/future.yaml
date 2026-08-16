@@ -1,8 +1,4 @@
-# Future language connectors — NOT_AVAILABLE
-# These entries define the extension architecture for future connectors.
-# Real migration is NOT implemented for any of these languages.
-# The platform returns ASSESSMENT_ONLY or NOT_AVAILABLE for all of them.
-
+# Future language connectors — Assessment & extension architecture
 - name: cpp-modernization
   language: cpp
   provider: clang-tidy
@@ -10,57 +6,34 @@
   possible_tool: "Clang / clang-tidy"
   notes: "Real connector not yet implemented. Assessment report only."
 
-- name: csharp-modernization
-  language: csharp
-  provider: roslyn
-  status: NOT_AVAILABLE
-  possible_tool: "Roslyn / .NET Upgrade Assistant"
-  notes: "Real connector not yet implemented. Assessment report only."
-
-- name: javascript-modernization
-  language: javascript
-  provider: jscodeshift
-  status: NOT_AVAILABLE
-  possible_tool: "Babel AST / jscodeshift / codemods"
-  notes: "Real connector not yet implemented. Assessment report only."
-
-- name: typescript-modernization
-  language: typescript
-  provider: ts-morph
-  status: NOT_AVAILABLE
-  possible_tool: "TypeScript compiler APIs / ts-morph"
-  notes: "Real connector not yet implemented. Assessment report only."
-
 - name: go-modernization
   language: go
   provider: go-fix
-  status: NOT_AVAILABLE
+  status: PARTIAL
   possible_tool: "gofmt / go vet / go fix"
-  notes: "Real connector not yet implemented. Assessment report only."
+  notes: "Go module analysis and standard library upgrades."
 
 - name: php-modernization
   language: php
   provider: rector
-  status: NOT_AVAILABLE
+  status: PARTIAL
   possible_tool: "Rector / PHP-CS-Fixer"
-  notes: "Real connector not yet implemented. Assessment report only."
+  notes: "Rector AST refactoring from PHP 7.x to modern PHP 8.x."
 
 - name: kotlin-modernization
   language: kotlin
   provider: unknown
   status: NOT_AVAILABLE
-  notes: "Real connector not yet implemented. Assessment report only."
+  notes: "Assessment report only."
 
 - name: ruby-modernization
   language: ruby
   provider: unknown
   status: NOT_AVAILABLE
-  notes: "Real connector not yet implemented. Assessment report only."
+  notes: "Assessment report only."
 
 - name: cobol-modernization
   language: cobol
   provider: unknown
   status: ASSESSMENT_ONLY
   notes: "COBOL modernization requires specialized tooling. Assessment and roadmap only."
-
-

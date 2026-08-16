@@ -959,6 +959,7 @@ class UniversalScanner:
         found_docs.sort(key=_doc_sort_key)
 
         doc_items: List[DocItem] = []
+        all_install = set()
         all_build = set()
         all_run = set()
         all_test = set()
@@ -1041,16 +1042,35 @@ class UniversalScanner:
                             if line_clean:
                                 extracted_lines.append(line_clean)
 
+            install_cmds = []
             # Categorize extracted command lines
             for cmd in extracted_lines:
                 cmd_lower = cmd.lower()
-                if any(k in cmd_lower for k in ["build", "compile", "make", "msbuild", "mvn clean", "mvn package", "gradle assemble", "dotnet publish", "cargo build", "npm run build", "yarn build"]):
+                if any(k in cmd_lower for k in [
+                    "install", "pnpm i", "npm i", "yarn add", "pip install", "poetry install",
+                    "dotnet restore", "bundle install", "composer install", "mvn dependency"
+                ]):
+                    install_cmds.append(cmd)
+                    all_install.add(cmd)
+                elif any(k in cmd_lower for k in [
+                    "build", "compile", "make", "msbuild", "mvn clean", "mvn package",
+                    "gradle assemble", "dotnet publish", "cargo build", "npm run build",
+                    "pnpm build", "pnpm run build", "yarn build", "bun build", "bun run build"
+                ]):
                     build_cmds.append(cmd)
                     all_build.add(cmd)
-                elif any(k in cmd_lower for k in ["test", "pytest", "npm test", "yarn test", "mvn test", "dotnet test", "cargo test", "ctest"]):
+                elif any(k in cmd_lower for k in [
+                    "test", "pytest", "npm test", "pnpm test", "yarn test", "bun test",
+                    "mvn test", "dotnet test", "cargo test", "ctest", "jest", "vitest"
+                ]):
                     test_cmds.append(cmd)
                     all_test.add(cmd)
-                elif any(k in cmd_lower for k in ["run", "start", "serve", "dotnet run", "npm start", "yarn start", "python main", "python app", "uvicorn", "gunicorn", "docker run", "docker-compose up", "flask run"]):
+                elif any(k in cmd_lower for k in [
+                    "run", "start", "serve", "dev", "dotnet run", "npm start", "npm run dev",
+                    "pnpm start", "pnpm dev", "pnpm run dev", "yarn start", "yarn dev",
+                    "bun start", "bun dev", "python main", "python app", "uvicorn", "gunicorn",
+                    "docker run", "docker-compose up", "flask run"
+                ]):
                     run_cmds.append(cmd)
                     all_run.add(cmd)
 
@@ -1085,6 +1105,7 @@ class UniversalScanner:
                 file_name=doc_file.name,
                 is_root=is_root,
                 content_preview=preview,
+                install_commands=install_cmds[:10],
                 build_commands=build_cmds[:10],
                 run_commands=run_cmds[:10],
                 test_commands=test_cmds[:10],

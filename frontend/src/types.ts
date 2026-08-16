@@ -83,6 +83,15 @@ export interface TechnologyProfile {
   frameworks: FrameworkProfile[];
   build_systems: string[];
   test_frameworks: string[];
+  documentation?: {
+    all_install_commands?: string[];
+    all_build_commands?: string[];
+    all_run_commands?: string[];
+    all_test_commands?: string[];
+    all_servers?: string[];
+    all_databases?: string[];
+    all_env_vars?: string[];
+  };
 }
 
 export interface IngestResponse {

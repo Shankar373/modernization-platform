@@ -1,0 +1,31 @@
+---
+name: csharp-modernization
+language: csharp
+provider: roslyn
+status: AVAILABLE
+source_versions:
+  - ".NET Framework 4.5"
+  - ".NET Framework 4.8"
+  - ".NET Core 3.1"
+  - ".NET 6.0"
+target_versions:
+  - ".NET 8.0"
+  - ".NET 9.0"
+risk: LOW
+description: "C# syntax modernization (file-scoped namespaces, nullable reference types, modern pattern matching) and SDK-style project upgrade."
+
+---
+name: csharp-roslyn-ast
+language: csharp
+provider: roslyn
+status: AVAILABLE
+source_versions:
+  - "C# 7.0"
+  - "C# 8.0"
+  - "C# 9.0"
+target_versions:
+  - "C# 10.0"
+  - "C# 11.0"
+  - "C# 12.0"
+risk: LOW
+description: "Roslyn AST syntax transformations preserving comments, directives, and code formatting."

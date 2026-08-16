@@ -21,6 +21,7 @@ class GitIngestRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     project_id: str
+    project_name: str = "unnamed"
     workspace_path: str
     source_type: str
     message: str
@@ -63,6 +64,7 @@ async def ingest_zip(
 
         return IngestResponse(
             project_id=project_id,
+            project_name=effective_name,
             workspace_path=workspace_path,
             source_type="zip",
             message="Repository ingested successfully.",
@@ -106,6 +108,7 @@ async def ingest_git(request: GitIngestRequest, db: AsyncSession = Depends(get_d
 
         return IngestResponse(
             project_id=project_id,
+            project_name=effective_name,
             workspace_path=workspace_path,
             source_type="git",
             message="Repository cloned successfully.",

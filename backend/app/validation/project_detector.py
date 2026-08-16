@@ -54,10 +54,23 @@ def detect_project(file_path: Path, workspace_root: Path) -> Optional[ProjectMan
         if (file_path.parent / "gradlew").exists(): wrappers.append("gradlew")
         if (file_path.parent / "gradlew.bat").exists(): wrappers.append("gradlew.bat")
 
-    manifest_rel = str(file_path.relative_to(workspace_root))
-    project_id = file_path.parent.name if file_path.parent.name else "root"
-    # To make project_id unique
-    project_id = f"{project_id}_{file_path.name}"
+        manifest_rel = str(file_path.relative_to(workspace_root))
+    
+    # Read custom project name if present
+    proj_name = ""
+    try:
+        name_file = workspace_root / ".project_name"
+        if name_file.exists():
+            proj_name = name_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
+    if file_path.parent == workspace_root:
+        parent_label = proj_name if (proj_name and proj_name != "unnamed") else "Root"
+    else:
+        parent_label = file_path.parent.name
+
+    project_id = f"{parent_label} ({file_path.name})" if parent_label else file_path.name
 
     return ProjectManifest(
         project_id=project_id,

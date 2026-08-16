@@ -14,6 +14,7 @@ import {
   optimizeCode,
   createGitCheckpoint,
   downloadCheckpointZip,
+  remediateFailure,
 } from '../api/client';
 import type {
   TechnologyProfile,
@@ -542,6 +543,7 @@ function ProfileStep({ profile, onContinue }: { profile: TechnologyProfile | nul
   const complexity = profile.languages.length + profile.frameworks.length * 1.5 + profile.build_systems.length;
   const complexityLabel = complexity < 3 ? 'Simple' : complexity < 7 ? 'Moderate' : 'Complex';
   const complexityColor = complexity < 3 ? '#10b981' : complexity < 7 ? '#f59e0b' : '#ef4444';
+  const doc = profile.documentation;
 
   return (
     <div className="animate-fade-up">
@@ -554,12 +556,75 @@ function ProfileStep({ profile, onContinue }: { profile: TechnologyProfile | nul
           <Badge text={complexityLabel} color={complexityColor} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: doc ? 20 : 0 }}>
           <ProfileSection title="Languages" items={profile.languages.map(l => `${l.name}${l.version ? ` ${l.version}` : ''}`)} color="#6366f1" />
           <ProfileSection title="Frameworks" items={profile.frameworks.map(f => `${f.name}${f.version ? ` v${f.version}` : ''}`)} color="#06b6d4" />
           <ProfileSection title="Build Systems" items={profile.build_systems} color="#10b981" />
           <ProfileSection title="Test Frameworks" items={profile.test_frameworks} color="#f59e0b" />
         </div>
+
+        {doc && (
+          <div style={{ marginTop: 20, padding: 18, background: 'rgba(29, 127, 138, 0.08)', borderRadius: 10, border: '1px solid rgba(29, 127, 138, 0.25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 18 }}>📖</span>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                README & Infrastructure Insights Extracted
+              </h3>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+              {(doc.all_install_commands || []).length > 0 && (
+                <div>
+                  <strong style={{ fontSize: 12, color: 'var(--color-text)' }}>📥 Install & Setup:</strong>
+                  <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {doc.all_install_commands!.map((cmd, i) => (
+                      <code key={i} style={{ fontSize: 11, color: '#10b981', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: 4 }}>$ {cmd}</code>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(doc.all_build_commands || []).length > 0 && (
+                <div>
+                  <strong style={{ fontSize: 12, color: 'var(--color-text)' }}>🔨 Build Commands:</strong>
+                  <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {doc.all_build_commands!.map((cmd, i) => (
+                      <code key={i} style={{ fontSize: 11, color: '#6366f1', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: 4 }}>$ {cmd}</code>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(doc.all_test_commands || []).length > 0 && (
+                <div>
+                  <strong style={{ fontSize: 12, color: 'var(--color-text)' }}>🧪 Test Commands:</strong>
+                  <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {doc.all_test_commands!.map((cmd, i) => (
+                      <code key={i} style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: 4 }}>$ {cmd}</code>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(doc.all_servers || []).length > 0 && (
+                <div>
+                  <strong style={{ fontSize: 12, color: 'var(--color-text)' }}>🖥️ Servers & Cloud:</strong>
+                  <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {doc.all_servers!.map((s, i) => (
+                      <span key={i} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(255,255,255,0.08)' }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(doc.all_databases || []).length > 0 && (
+                <div>
+                  <strong style={{ fontSize: 12, color: 'var(--color-text)' }}>🗄️ Databases & Queues:</strong>
+                  <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {doc.all_databases!.map((db, i) => (
+                      <span key={i} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(255,255,255,0.08)' }}>{db}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
@@ -596,7 +661,8 @@ function DepDetectionStep({ depResult, onContinue }: { depResult: DependencyAnal
         <InfoCard icon="⚡" label="Ecosystems" value={[...new Set(depResult.dependency_files.map(f => f.ecosystem))].length.toString()} />
       </div>
       <div className="card">
-        <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>DETECTED DEPENDENCY FILES</h3>
+        <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>DETECTED DEPENDENCY FILES ({depResult.dependency_files.length})</h3>
+        <div style={{ maxHeight: 380, overflowY: 'auto' }}>
         {depResult.dependency_files.map(f => (
           <div key={f.path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -610,6 +676,7 @@ function DepDetectionStep({ depResult, onContinue }: { depResult: DependencyAnal
           </div>
         ))}
         {depResult.dependency_files.length === 0 && <p className="text-muted">No dependency files found in workspace.</p>}
+        </div>
       </div>
       <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn btn-primary" onClick={onContinue}>
@@ -714,7 +781,8 @@ function DepReviewStep({
               {allSelected ? 'Deselect All' : 'Select All'}
             </button>
           </div>
-          <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card" style={{ marginBottom: 20, padding: 18 }}>
+            <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 6 }}>
             {updates.map(u => {
               const key = u.dependency_name + u.source_file;
               const checked = approvedIds.has(key);
@@ -733,12 +801,15 @@ function DepReviewStep({
                 </div>
               );
             })}
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+            <button className="btn btn-ghost" onClick={onSkip}>
+              Skip (no updates)
+            </button>
             <button className="btn btn-primary" onClick={onContinue} disabled={approvedIds.size === 0}>
               ⚙️ Apply {approvedIds.size} Update{approvedIds.size !== 1 ? 's' : ''} →
             </button>
-            <button className="btn btn-ghost" onClick={onSkip}>Skip (no updates)</button>
           </div>
         </>
       )}
@@ -926,14 +997,9 @@ function RecipeSelectionStep({
           <h3 style={{ marginBottom: 4 }}>Select Migration Recipes</h3>
           <p className="text-muted text-sm">{selectedIds.size} recipe{selectedIds.size !== 1 ? 's' : ''} selected.</p>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={toggleAll}>
-            {allSelected ? 'Deselect All' : 'Select All'}
-          </button>
-          <button className="btn btn-primary" onClick={onContinue} disabled={selectedIds.size === 0}>
-            Analyse {selectedIds.size} Recipe{selectedIds.size !== 1 ? 's' : ''} →
-          </button>
-        </div>
+        <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={toggleAll}>
+          {allSelected ? 'Deselect All' : 'Select All'}
+        </button>
       </div>
 
       <div style={{ marginBottom: 20 }}>
@@ -945,6 +1011,7 @@ function RecipeSelectionStep({
         />
       </div>
 
+      <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
       {Object.entries(grouped).map(([group, recipes]) => (
         <div key={group} className="card" style={{ marginBottom: 16 }}>
           <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>{group.toUpperCase()} ({recipes.length})</h3>
@@ -954,6 +1021,16 @@ function RecipeSelectionStep({
         </div>
       ))}
       {filtered.length === 0 && <p className="text-muted text-center" style={{ padding: 24 }}>No recipes match your filter.</p>}
+      </div>
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+        <button
+          className="btn btn-primary"
+          onClick={onContinue}
+          disabled={selectedIds.size === 0}
+        >
+          Analyse {selectedIds.size} Selected Recipe{selectedIds.size !== 1 ? 's' : ''} →
+        </button>
+      </div>
     </div>
   );
 }
@@ -1067,7 +1144,7 @@ function ConflictResolutionStep({
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
         <button className="btn btn-ghost" onClick={onSkip}>Proceed Anyway →</button>
         <button className="btn btn-primary" onClick={onContinue}>Resolve & Continue →</button>
       </div>
@@ -1116,7 +1193,7 @@ function PlanStep({ plan, onContinue }: { plan: MigrationPlan | null; onContinue
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
         <button className="btn btn-primary" onClick={onContinue}>🎯 Create Git Checkpoint →</button>
       </div>
     </div>
@@ -1150,13 +1227,172 @@ function CheckingStep({ label, result, error }: { label: string; result: unknown
   );
 }
 
-function RecipeExecuteStep({ result, error }: { result: any; error: string | null }) {
+
+function AiRemediationCard({
+  stage,
+  error,
+  projectId,
+  workspacePath,
+  selectedRecipeIds,
+  onRemediate,
+}: {
+  stage: string;
+  error: string;
+  projectId: string;
+  workspacePath: string;
+  selectedRecipeIds: Set<string>;
+  onRemediate: (adjustedRecipes: string[]) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [remediation, setRemediation] = useState<any>(null);
+  const [remediationError, setRemediationError] = useState<string | null>(null);
+
+  const handleRequestRemediation = async () => {
+    setLoading(true);
+    setRemediationError(null);
+    try {
+      const res = await remediateFailure({
+        project_id: projectId,
+        workspace_path: workspacePath,
+        failed_stage: stage,
+        error_message: error,
+        executed_recipes: Array.from(selectedRecipeIds),
+        attempt_number: 1,
+        max_retries: 3
+      });
+      setRemediation(res.data);
+    } catch (e: any) {
+      setRemediationError(e?.response?.data?.detail || e.message || 'Remediation request failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="card animate-fade-in" style={{
+      margin: '20px 0',
+      padding: '24px',
+      background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(16, 185, 129, 0.08))',
+      border: '1px solid rgba(99, 102, 241, 0.4)',
+      borderRadius: 12,
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+      textAlign: 'left'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 28 }}>🤖</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#fff' }}>Autonomous AI Self-Healing Remediation</h3>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-muted)' }}>
+              Automatically rollback mutations and consult AI for a working recipe substitute
+            </p>
+          </div>
+        </div>
+        <span style={{
+          padding: '4px 10px',
+          borderRadius: 99,
+          fontSize: 11,
+          fontWeight: 700,
+          background: 'rgba(99, 102, 241, 0.2)',
+          color: '#818cf8',
+          border: '1px solid rgba(99, 102, 241, 0.4)'
+        }}>
+          Auto-Rollback Active
+        </span>
+      </div>
+
+      {!remediation ? (
+        <div>
+          <p style={{ fontSize: 13, color: 'var(--color-text)', marginBottom: 16 }}>
+            A failure occurred during <strong>{stage}</strong>. Click below to roll back the workspace to the clean Git Checkpoint and generate an AI-remediated execution plan.
+          </p>
+          <button
+            className="btn btn-primary"
+            onClick={handleRequestRemediation}
+            disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+          >
+            {loading ? <Spinner size={16} /> : '⚡'}
+            {loading ? 'Rolling back & Consulting AI...' : 'Rollback & Get AI Fix Recommendation'}
+          </button>
+          {remediationError && (
+            <p style={{ color: 'var(--color-error)', fontSize: 12, marginTop: 12 }}>{remediationError}</p>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ padding: '12px 16px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+            <strong style={{ color: '#34d399', fontSize: 13 }}>✅ Git Checkpoint Rollback:</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--color-text)' }}>
+              {remediation.rollback_message}
+            </p>
+          </div>
+
+          <div style={{ padding: '12px 16px', background: 'rgba(99, 102, 241, 0.1)', borderRadius: 8, border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+            <strong style={{ color: '#818cf8', fontSize: 13 }}>🧠 AI Diagnostic & Solution:</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--color-text)' }}>
+              {remediation.ai_explanation}
+            </p>
+            {remediation.adjusted_recipes && remediation.adjusted_recipes.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Adjusted Recipe Plan ({remediation.adjusted_recipes.length} recipes):
+                </span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {remediation.adjusted_recipes.map((r: string) => (
+                    <span key={r} style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', fontSize: 12 }}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => onRemediate(remediation.adjusted_recipes)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              🔄 Apply AI Plan & Re-Execute (Attempt {remediation.attempt_number}/{remediation.max_retries})
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecipeExecuteStep({
+  result,
+  error,
+  projectId = '',
+  workspacePath = '',
+  selectedRecipeIds = new Set(),
+  onRemediate = () => {},
+}: {
+  result: any;
+  error: string | null;
+  projectId?: string;
+  workspacePath?: string;
+  selectedRecipeIds?: Set<string>;
+  onRemediate?: (adjustedRecipes: string[]) => void;
+}) {
   if (error) {
     return (
       <div style={{ padding: 24, textAlign: 'center' }}>
         <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
         <h3 style={{ marginBottom: 12 }}>Recipe Execution Failed</h3>
         <p style={{ color: '#fca5a5', marginBottom: 16 }}>{error}</p>
+        <AiRemediationCard
+          stage="executing-recipes"
+          error={error}
+          projectId={projectId}
+          workspacePath={workspacePath}
+          selectedRecipeIds={selectedRecipeIds}
+          onRemediate={onRemediate}
+        />
       </div>
     );
   }
@@ -1366,22 +1602,121 @@ export default function Pipeline() {
   const navigate = useNavigate();
 
   const workspacePath = searchParams.get('wp') || '';
+  const projectNameFromUrl = searchParams.get('name') || '';
 
-  const [stage, setStage] = useState<StageKey>('discovery');
-  const [profile, setProfile] = useState<TechnologyProfile | null>(null);
-  const [depResult, setDepResult] = useState<DependencyAnalysisResult | null>(null);
-  const [applyResult, setApplyResult] = useState<DependencyAnalysisResult | null>(null);
-  const [recommendations, setRecommendations] = useState<Recipe[] | null>(null);
-  const [llmPowered, setLlmPowered] = useState(false);
-  const [llmProvider, setLlmProvider] = useState<string>('');
-  const [selectedRecipeIds, setSelectedRecipeIds] = useState<Set<string>>(new Set());
-  const [approvedDepIds, setApprovedDepIds] = useState<Set<string>>(new Set());
-  const [recipeAnalysis, setRecipeAnalysis] = useState<RecipeAnalysisResult | null>(null);
-  const [plan, setPlan] = useState<MigrationPlan | null>(null);
-  const [checkpointResult, setCheckpointResult] = useState<GitCheckpointResult | null>(null);
+  const getSavedProjectName = () => {
+    if (projectNameFromUrl) return projectNameFromUrl;
+    try {
+      const raw = sessionStorage.getItem(`project_${projectId}`);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p.project_name) return p.project_name;
+      }
+    } catch {}
+    if (workspacePath) {
+      const parts = workspacePath.split(/[\\/]/).filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last && !last.startsWith('systema_')) return last;
+    }
+    return '';
+  };
+
+  const displayName = getSavedProjectName() || (projectId ? `Project (${projectId.slice(0, 8)})` : 'Project');
+
+  // Helper to load cached in-progress state for this project
+  const loadSavedState = () => {
+    if (!projectId) return null;
+    try {
+      const raw = localStorage.getItem(`pipeline_state_${projectId}`);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  const initialCached = loadSavedState();
+  const stageFromUrl = searchParams.get('stage') as StageKey;
+
+  const [projectName, setProjectName] = useState<string>(initialCached?.projectName || displayName);
+  const [stage, setStage] = useState<StageKey>(stageFromUrl || initialCached?.stage || 'discovery');
+  const [profile, setProfile] = useState<TechnologyProfile | null>(initialCached?.profile || null);
+  const [depResult, setDepResult] = useState<DependencyAnalysisResult | null>(initialCached?.depResult || null);
+  const [applyResult, setApplyResult] = useState<DependencyAnalysisResult | null>(initialCached?.applyResult || null);
+  const [recommendations, setRecommendations] = useState<Recipe[] | null>(initialCached?.recommendations || null);
+  const [llmPowered, setLlmPowered] = useState(initialCached?.llmPowered || false);
+  const [llmProvider, setLlmProvider] = useState<string>(initialCached?.llmProvider || '');
+  const [selectedRecipeIds, setSelectedRecipeIds] = useState<Set<string>>(
+    initialCached?.selectedRecipeIds ? new Set(initialCached.selectedRecipeIds) : new Set()
+  );
+  const [approvedDepIds, setApprovedDepIds] = useState<Set<string>>(
+    initialCached?.approvedDepIds ? new Set(initialCached.approvedDepIds) : new Set()
+  );
+  const [recipeAnalysis, setRecipeAnalysis] = useState<RecipeAnalysisResult | null>(initialCached?.recipeAnalysis || null);
+  const [plan, setPlan] = useState<MigrationPlan | null>(initialCached?.plan || null);
+  const [checkpointResult, setCheckpointResult] = useState<GitCheckpointResult | null>(initialCached?.checkpointResult || null);
   const [checkpointError, setCheckpointError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const hasRun = useRef(false);
+  const hasRun = useRef(initialCached?.profile ? true : false);
+
+  const [recipeRun, setRecipeRun] = useState<any>(initialCached?.recipeRun || null);
+  const [recipeRunError, setRecipeRunError] = useState<string | null>(null);
+  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(initialCached?.optimizationResult || null);
+  const [optimizationError, setOptimizationError] = useState<string | null>(null);
+
+  // Sync complete active migration progress to localStorage for full resume
+  useEffect(() => {
+    if (!projectId || !workspacePath) return;
+    if (stage === 'done') {
+      localStorage.removeItem('active_migration');
+      localStorage.removeItem(`pipeline_state_${projectId}`);
+      window.dispatchEvent(new Event('active_migration_updated'));
+      return;
+    }
+    const currentStep = STEPS.find(s => s.key === stage);
+    const info = {
+      projectId,
+      workspacePath,
+      stage,
+      stepNumber: currentStep?.number || 1,
+      stepTitle: currentStep?.title || stage,
+      stepIcon: currentStep?.icon || '⚙️',
+      timestamp: Date.now(),
+    };
+    localStorage.setItem('active_migration', JSON.stringify(info));
+
+    const fullState = {
+      projectId,
+      workspacePath,
+      stage,
+      profile,
+      depResult,
+      applyResult,
+      recommendations,
+      llmPowered,
+      llmProvider,
+      selectedRecipeIds: Array.from(selectedRecipeIds),
+      approvedDepIds: Array.from(approvedDepIds),
+      recipeAnalysis,
+      plan,
+      checkpointResult,
+      recipeRun,
+      optimizationResult,
+      timestamp: Date.now(),
+    };
+    try {
+      localStorage.setItem(`pipeline_state_${projectId}`, JSON.stringify(fullState));
+    } catch {
+      try {
+        const leanState = { ...fullState, recipeRun: null, optimizationResult: null };
+        localStorage.setItem(`pipeline_state_${projectId}`, JSON.stringify(leanState));
+      } catch {}
+    }
+    window.dispatchEvent(new Event('active_migration_updated'));
+  }, [
+    projectId, workspacePath, stage, profile, depResult, applyResult, recommendations,
+    llmPowered, llmProvider, selectedRecipeIds, approvedDepIds, recipeAnalysis, plan,
+    checkpointResult, recipeRun, optimizationResult
+  ]);
+
 
   useEffect(() => {
     if (hasRun.current || !projectId || !workspacePath) return;
@@ -1390,6 +1725,9 @@ export default function Pipeline() {
     analyzeRepo(workspacePath, projectId)
       .then(res => {
         const data = res.data;
+        if (data.project_name) {
+          setProjectName(data.project_name);
+        }
         const p = data.profile || {};
         const profileData: TechnologyProfile = {
           profile_id: p.profile_id || projectId,
@@ -1398,6 +1736,7 @@ export default function Pipeline() {
           frameworks: p.frameworks || [],
           build_systems: (p.build_systems || []).map((b: any) => b.name || b),
           test_frameworks: p.testing_frameworks || [],
+          documentation: p.documentation || data.documentation,
         };
         setProfile(profileData);
       })
@@ -1539,10 +1878,7 @@ export default function Pipeline() {
       });
   }, [stage]);
 
-  const [recipeRun, setRecipeRun] = useState<any>(null);
-  const [recipeRunError, setRecipeRunError] = useState<string | null>(null);
-  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
-  const [optimizationError, setOptimizationError] = useState<string | null>(null);
+
 
 
   useEffect(() => {
@@ -1697,6 +2033,19 @@ export default function Pipeline() {
           <RecipeExecuteStep
             result={recipeRun}
             error={recipeRunError}
+            projectId={projectId || ''}
+            workspacePath={workspacePath}
+            selectedRecipeIds={selectedRecipeIds}
+            onRemediate={(adjustedRecipes: string[]) => {
+              if (adjustedRecipes.length > 0) {
+                setSelectedRecipeIds(new Set(adjustedRecipes));
+              }
+              setRecipeRun(null);
+              setRecipeRunError(null);
+              setOptimizationResult(null);
+              setOptimizationError(null);
+              go('executing-recipes');
+            }}
           />
         );
       case 'optimizing':
@@ -1754,8 +2103,29 @@ export default function Pipeline() {
       }}>
         <div style={{ padding: '0 20px 16px', borderBottom: '1px solid var(--color-border)', marginBottom: 8 }}>
           <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Migration Pipeline</p>
-          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-            {projectId}
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: 'var(--color-text)',
+              marginTop: 4,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+            title={projectName || displayName}
+          >
+            <span>📁</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {(projectName && projectName !== 'unnamed')
+                ? projectName
+                : (displayName && displayName !== 'unnamed')
+                  ? displayName
+                  : 'Active Migration Project'}
+            </span>
           </p>
         </div>
 
@@ -1869,10 +2239,11 @@ function VerifyRecipeChangesStep({
         ))}
       </div>
 
-      <div className="card" style={{ marginBottom: 24 }}>
-        <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+      <div className="card" style={{ marginBottom: 20, padding: 20 }}>
+        <h3 style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
           Executed Recipes ({recipesList.length})
         </h3>
+        <div style={{ maxHeight: 340, overflowY: 'auto', paddingRight: 6 }}>
         {recipesList.map((r: any, idx: number) => {
           const hasChanges = r.files_actually_changed && r.files_actually_changed.length > 0;
           return (
@@ -1906,9 +2277,10 @@ function VerifyRecipeChangesStep({
             </div>
           );
         })}
+        </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
         <button className="btn btn-primary" onClick={onContinue}>
           🎯 Continue to Code Cleanup & Optimization →
         </button>
@@ -2048,9 +2420,9 @@ function FinalValidationStep({
       )}
 
       {valResult.validation_results && valResult.validation_results.length > 0 && (
-        <div className="card" style={{ marginBottom: 32 }}>
-          <h3 style={{ marginBottom: 16, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>DETAILED PROJECT VALIDATION</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="card" style={{ marginBottom: 24, padding: 20 }}>
+          <h3 style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', textTransform: 'uppercase' }}>DETAILED PROJECT VALIDATION</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 340, overflowY: 'auto', paddingRight: 6 }}>
             {valResult.validation_results.map((r: any, idx: number) => (
               <div key={idx} style={{ padding: '12px 16px', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
@@ -2078,9 +2450,9 @@ function FinalValidationStep({
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
         <button className="btn btn-primary" onClick={onFinish}>
-          Finish Migration
+          🎉 Finish Migration →
         </button>
       </div>
     </div>

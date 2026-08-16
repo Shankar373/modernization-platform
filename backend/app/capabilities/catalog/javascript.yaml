@@ -1,0 +1,15 @@
+---
+name: javascript-modernization
+language: javascript
+provider: jscodeshift
+status: AVAILABLE
+source_versions:
+  - "ES5"
+  - "ES6 / ES2015"
+  - "CommonJS"
+target_versions:
+  - "ES2022"
+  - "ESNext"
+  - "ESM"
+risk: LOW
+description: "CommonJS to ESM transformations, async/await modernizations, and package ecosystem upgrades."
